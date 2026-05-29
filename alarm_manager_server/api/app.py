@@ -1,0 +1,119 @@
+from __future__ import annotations
+
+from fastapi import FastAPI, Query
+from pydantic import BaseModel
+
+from alarm_manager_server.config import Settings, settings
+from alarm_manager_server.models.incident import GroupingResult, ProcessedIncident
+from alarm_manager_server.services.processor import AlarmProcessor
+
+app = FastAPI(
+    title="Alarm Manager Server",
+    description="Server-side alarm grouping and responsible-party resolution",
+    version="0.1.0",
+)
+
+
+class GroupingResponse(BaseModel):
+    children_of: dict[str, list[str]]
+    parent_of: dict[str, str]
+    parent_title_of: dict[str, str]
+
+
+class ProcessResponse(BaseModel):
+    incidents: list[ProcessedIncident]
+    grouping: GroupingResponse
+    total: int
+    visible_count: int
+
+
+_processor: AlarmProcessor | None = None
+
+
+def get_processor() -> AlarmProcessor:
+    global _processor
+    if _processor is None:
+        _processor = AlarmProcessor()
+    return _processor
+
+
+@app.get("/health")
+async def health() -> dict[str, str]:
+    return {"status": "ok"}
+
+
+@app.get("/config")
+async def get_config() -> Settings:
+    return settings
+
+
+@app.post("/process", response_model=ProcessResponse)
+async def process_incidents(
+    resolve_macros: bool = Query(default=True, description="Resolve responsible-party macros"),
+) -> ProcessResponse:
+    processor = get_processor()
+    incidents = await processor.fetch_incidents()
+    grouping = await processor.compute_grouping(incidents)
+
+    class_ids = await processor.client.resolve_class_ids_by_names(processor.cfg.group_by_class_names)
+    from alarm_manager_server.services.grouping import build_synthetic_incidents, group_by_class
+
+    _, synthetic_seeds = group_by_class(
+        incidents, processor.store, class_ids, processor.cfg.group_by_depth
+    )
+    synthetic = build_synthetic_incidents(synthetic_seeds, {i.id: i for i in incidents})
+    all_incidents = synthetic + incidents
+
+    if resolve_macros:
+        responsible = await processor.resolve_responsible_parties(
+            [i for i in all_incidents if not i.is_synthetic]
+        )
+    else:
+        responsible = {}
+
+    processed: list[ProcessedIncident] = []
+    for inc in all_incidents:
+        parent_title = grouping.parent_title_of.get(inc.id)
+        parent_id = grouping.parent_of.get(inc.id)
+        child_ids = grouping.children_of.get(inc.id, [])
+        has_parent = inc.id in grouping.parent_of
+        show_suffix = (
+            not inc.is_synthetic and not has_parent and parent_title and parent_title != inc.title
+        )
+        display_title = f"{inc.title} ({parent_title})" if show_suffix else inc.title
+
+        processed.append(
+            ProcessedIncident(
+                **inc.model_dump(),
+                avaria_owner=responsible.get(inc.id) if not inc.is_synthetic else None,
+                parent_title=parent_title,
+                parent_id=parent_id,
+                child_ids=child_ids,
+                display_title=display_title,
+            )
+        )
+
+    visible = processor.visible_rows(processed, grouping)
+
+    return ProcessResponse(
+        incidents=processed,
+        grouping=GroupingResponse(
+            children_of=grouping.children_of,
+            parent_of=grouping.parent_of,
+            parent_title_of=grouping.parent_title_of,
+        ),
+        total=len(processed),
+        visible_count=len(visible),
+    )
+
+
+@app.post("/grouping", response_model=GroupingResponse)
+async def compute_grouping_only() -> GroupingResponse:
+    processor = get_processor()
+    incidents = await processor.fetch_incidents()
+    grouping = await processor.compute_grouping(incidents)
+    return GroupingResponse(
+        children_of=grouping.children_of,
+        parent_of=grouping.parent_of,
+        parent_title_of=grouping.parent_title_of,
+    )

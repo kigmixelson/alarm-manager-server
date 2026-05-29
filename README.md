@@ -1,0 +1,93 @@
+# Alarm Manager Server
+
+Серверное Python-приложение, реализующее логику группировки аварий и определения ответственных из клиентского приложения «Менеджер Аварий» (alarm-manager).
+
+## Возможности
+
+- **Группировка по owner** — сворачивает аварии одного объекта мониторинга (активные + исторические)
+- **Группировка по классу предка** — BFS вверх по иерархии объектов, поиск контейнеров классов Host/Router/Local Address
+- **Синтетические группы** — обёртки для предков без собственной аварии (≥2 детей)
+- **Объединение группировок** — owner имеет приоритет над class-группировкой
+- **Определение ответственных** — резолв макросов `{{parent[class.id=...].properties[...]}}` по цепочке предков
+
+## Установка
+
+```bash
+cd ../alarm-manager-server
+python -m venv .venv
+source .venv/bin/activate
+pip install -e ".[dev]"
+cp .env.example .env
+# отредактируйте SAYMON_BASE_URL
+```
+
+## Запуск
+
+```bash
+alarm-manager-server
+# или
+uvicorn alarm_manager_server.api.app:app --reload --port 8000
+```
+
+### Фоновый worker (группировка в консоль)
+
+Отдельный процесс опрашивает `POST /process` и печатает группы: название, затем ссылки на аварии (одиночные аварии — группа из одной ссылки). Между группами — пустая строка.
+
+```bash
+# один проход
+alarm-manager-worker --once
+
+# цикл каждые 60 с (SERVER_URL / WORKER_INTERVAL_SEC в .env)
+alarm-manager-worker
+
+# или
+python -m alarm_manager_server.worker --server-url http://127.0.0.1:8000 --interval 30
+```
+
+Шаблон ссылки: `INCIDENT_LINK_TEMPLATE` (плейсхолдеры `{id}`, `{saymon_base_url}`).
+
+## API
+
+| Метод | Путь | Описание |
+|-------|------|----------|
+| GET | `/health` | Проверка работоспособности |
+| GET | `/config` | Текущие настройки |
+| POST | `/process` | Загрузить аварии, сгруппировать, определить ответственных |
+| POST | `/grouping` | Только группировка без макросов |
+
+### Пример
+
+```bash
+curl -X POST http://localhost:8000/process
+```
+
+## Архитектура
+
+```
+alarm_manager_server/
+├── models/incident.py       # Модели данных
+├── services/
+│   ├── grouping/            # owner, class, merge, synthetic
+│   ├── macros/              # parser, resolver
+│   └── processor.py         # Оркестратор
+├── saymon/                  # HTTP-клиент и object store
+└── api/app.py               # FastAPI
+```
+
+## Соответствие frontend
+
+| Frontend (TypeScript) | Server (Python) |
+|----------------------|-----------------|
+| `useOwnerGrouping.ts` | `services/grouping/owner.py` |
+| `useIncidentGrouping.ts` | `services/grouping/class_ancestor.py` |
+| `Index.tsx` merge | `services/grouping/merge.py` |
+| `Index.tsx` synthetic | `services/grouping/synthetic.py` |
+| `macroParser.ts` | `services/macros/parser.py` |
+| `useMacroResolver.ts` | `services/macros/resolver.py` |
+| `objectCache.ts` | `saymon/object_store.py` |
+
+## Тесты
+
+```bash
+pytest
+```
