@@ -1,3 +1,4 @@
+from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -6,6 +7,9 @@ class Settings(BaseSettings):
 
     saymon_base_url: str = "http://localhost:8080"
     saymon_api_prefix: str = "/node/api"
+    saymon_login: str = ""
+    saymon_password: SecretStr = SecretStr("")
+    saymon_auth_redirect_url: str = ""
 
     group_by_class_names: list[str] = ["Host", "Router", "Local Address"]
     group_by_depth: int = 4

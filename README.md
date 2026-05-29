@@ -18,8 +18,10 @@ python -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
 cp .env.example .env
-# отредактируйте SAYMON_BASE_URL
+# укажите SAYMON_BASE_URL, SAYMON_LOGIN, SAYMON_PASSWORD
 ```
+
+Перед запросами к SAYMON клиент выполняет `POST /node/api/users/session`, сохраняет cookies `sid` и `csrf`, затем (опционально) открывает `SAYMON_AUTH_REDIRECT_URL`. Все API-запросы идут с `Cookie` и заголовком `x-csrf-token`, как в curl `-b` / `-H 'x-csrf-token: ...'`.
 
 ## Запуск
 

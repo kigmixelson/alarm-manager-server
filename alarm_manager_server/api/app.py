@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Query
 from pydantic import BaseModel
 
@@ -7,10 +9,19 @@ from alarm_manager_server.config import Settings, settings
 from alarm_manager_server.models.incident import GroupingResult, ProcessedIncident
 from alarm_manager_server.services.processor import AlarmProcessor
 
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    yield
+    if _processor is not None:
+        await _processor.client.aclose()
+
+
 app = FastAPI(
     title="Alarm Manager Server",
     description="Server-side alarm grouping and responsible-party resolution",
     version="0.1.0",
+    lifespan=lifespan,
 )
 
 
@@ -43,8 +54,8 @@ async def health() -> dict[str, str]:
 
 
 @app.get("/config")
-async def get_config() -> Settings:
-    return settings
+async def get_config() -> dict:
+    return settings.model_dump(exclude={"saymon_password"})
 
 
 @app.post("/process", response_model=ProcessResponse)

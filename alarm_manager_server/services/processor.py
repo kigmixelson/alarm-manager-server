@@ -23,7 +23,7 @@ class AlarmProcessor:
         cfg: Settings | None = None,
     ) -> None:
         self.cfg = cfg or settings
-        self.client = client or SaymonClient(self.cfg.api_url)
+        self.client = client or SaymonClient.from_settings(self.cfg)
         self.store = store or ObjectStore(self.client)
         self.macro_resolver = MacroResolver(self.store, depth=self.cfg.macro_depth)
 
