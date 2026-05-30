@@ -84,6 +84,8 @@ async def process_incidents(
     else:
         responsible = {}
 
+    await processor._prefetch_owner_parent_names(all_incidents)
+
     processed: list[ProcessedIncident] = []
     for inc in all_incidents:
         processed.append(

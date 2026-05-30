@@ -18,23 +18,8 @@ async def build_owner_display_title(incident: Incident, store: ObjectStore) -> s
         return base
 
     if len(parent_ids) == 1:
-        parent_name = await _resolve_object_name(parent_ids[0], store)
+        parent_name = await store.resolve_object_name(parent_ids[0])
         return f"{base} ({parent_name})"
 
     count = len(parent_ids)
     return f"{base} (влияет на {count} родительских объектов)"
-
-
-async def _resolve_object_name(object_id: str, store: ObjectStore) -> str:
-    cached = store.peek_object(object_id)
-    name = cached.get("name") if cached else None
-    if isinstance(name, str) and name.strip():
-        return name.strip()
-
-    obj = await store.get_object(object_id)
-    if obj:
-        resolved = obj.get("name")
-        if isinstance(resolved, str) and resolved.strip():
-            return resolved.strip()
-
-    return object_id

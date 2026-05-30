@@ -96,6 +96,8 @@ class AlarmProcessor:
             [i for i in all_incidents if not i.is_synthetic]
         )
 
+        await self._prefetch_owner_parent_names(all_incidents)
+
         result: list[ProcessedIncident] = []
         for inc in all_incidents:
             result.append(
@@ -107,6 +109,14 @@ class AlarmProcessor:
             )
 
         return result
+
+    async def _prefetch_owner_parent_names(self, incidents: list[Incident]) -> None:
+        parent_ids = {
+            inc.owner.parent_id[0]
+            for inc in incidents
+            if inc.owner and len(inc.owner.parent_id) == 1 and inc.owner.parent_id[0]
+        }
+        await self.store.prefetch_object_names(parent_ids)
 
     async def _to_processed_incident(
         self,

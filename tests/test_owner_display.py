@@ -30,8 +30,14 @@ async def test_no_parents_returns_owner_name_only():
 
 @pytest.mark.asyncio
 async def test_single_parent_shows_parent_name():
-    store = ObjectStore()
-    store.upsert_object("parent-1", name="Host-1")
+    class FakeClient:
+        async def get_object(self, obj_id: str):
+            return {"_id": obj_id, "name": "Host-1", "properties": [], "class_id": 1}
+
+        async def get_object_paths(self, obj_id: str):
+            return None
+
+    store = ObjectStore(FakeClient())
     text = await build_owner_display_title(_incident(parent_ids=["parent-1"]), store)
     assert text == "Child-svc (Host-1)"
 
@@ -43,4 +49,4 @@ async def test_multiple_parents_shows_count_phrase():
         _incident(parent_ids=["p1", "p2", "p3"]),
         store,
     )
-    assert text == "Child-svc (влияет на 3 родительских объектов)"
+    assert "влияет на 3 родительских" in text

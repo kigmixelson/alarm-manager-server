@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -18,6 +19,7 @@ class ObjectStore:
         self._client = client
         self._objects: dict[str, dict[str, Any]] = {}
         self._paths_miss: set[str] = set()
+        self._name_inflight: dict[str, asyncio.Task[str]] = {}
 
     def seed_from_incident_owner(self, entity_id: str, owner: dict[str, Any] | None) -> None:
         if not owner:
@@ -105,37 +107,72 @@ class ObjectStore:
         )
 
     async def get_object(self, obj_id: str) -> dict[str, Any] | None:
+        obj_id = str(obj_id)
         cached = self.peek_object(obj_id)
-        if cached:
+        if cached and _has_real_name(cached, obj_id):
             return cached
         if self._client is None:
-            return None
+            return cached
         data = await self._client.get_object(obj_id)
         if data:
-            self.upsert_object(
-                obj_id,
-                name=data.get("name"),
-                class_id=data.get("class_id"),
-                class_name=data.get("class_name"),
-                parent_ids=_normalize_parent_ids(data.get("parent_id")),
-            )
+            self._upsert_from_api_payload(obj_id, data)
         return self.peek_object(obj_id)
 
+    async def resolve_object_name(self, object_id: str) -> str:
+        """Load human-readable object name (never return a stub without API fetch)."""
+        object_id = str(object_id)
+        cached = self.peek_object(object_id)
+        if cached and _has_real_name(cached, object_id):
+            return str(cached["name"]).strip()
+
+        inflight = self._name_inflight.get(object_id)
+        if inflight is not None:
+            return await inflight
+
+        task = asyncio.create_task(self._resolve_object_name_impl(object_id))
+        self._name_inflight[object_id] = task
+        try:
+            return await task
+        finally:
+            if self._name_inflight.get(object_id) is task:
+                self._name_inflight.pop(object_id, None)
+
+    async def _resolve_object_name_impl(self, object_id: str) -> str:
+        obj = await self.fetch_object_full(object_id)
+        if obj and _has_real_name(obj, object_id):
+            return str(obj["name"]).strip()
+
+        if self._client is not None and object_id not in self._paths_miss:
+            await self._fetch_paths_and_cache(object_id)
+            obj = self.peek_object(object_id)
+            if obj and _has_real_name(obj, object_id):
+                return str(obj["name"]).strip()
+
+        return object_id
+
+    async def prefetch_object_names(self, object_ids: set[str]) -> None:
+        ids = {str(i) for i in object_ids if i}
+        if not ids:
+            return
+        await asyncio.gather(*(self.resolve_object_name(i) for i in ids))
+
     async def fetch_object_full(self, obj_id: str) -> dict[str, Any] | None:
+        obj_id = str(obj_id)
+        cached = self.peek_object(obj_id)
+        if (
+            cached
+            and _has_real_name(cached, obj_id)
+            and cached.get("has_props")
+            and cached.get("class_id") is not None
+        ):
+            return cached
         if self._client is None:
-            return None
+            return cached
         data = await self._client.get_object(obj_id)
         if not data:
-            return None
+            return self.peek_object(obj_id)
         props = data.get("properties") if isinstance(data.get("properties"), list) else []
-        self.upsert_object(
-            obj_id,
-            name=data.get("name"),
-            class_id=data.get("class_id"),
-            class_name=data.get("class_name"),
-            properties=props,
-            parent_ids=_normalize_parent_ids(data.get("parent_id")),
-        )
+        self._upsert_from_api_payload(obj_id, data, properties=props)
         return self.peek_object(obj_id)
 
     async def get_object_with_props(self, obj_id: str) -> dict[str, Any] | None:
@@ -225,12 +262,48 @@ class ObjectStore:
             props = obj.get("properties") if isinstance(obj.get("properties"), list) else None
             self.upsert_object(
                 obj_id,
-                name=obj.get("name"),
+                name=_extract_name_from_payload(obj, obj_id),
                 class_id=obj.get("class_id"),
                 class_name=obj.get("class_name"),
                 properties=props,
                 parent_ids=parent_ids if parent_ids else None,
             )
+
+    def _upsert_from_api_payload(
+        self,
+        obj_id: str,
+        data: dict[str, Any],
+        *,
+        properties: list[dict[str, Any]] | None = None,
+    ) -> None:
+        props = properties
+        if props is None and isinstance(data.get("properties"), list):
+            props = data["properties"]
+        self.upsert_object(
+            obj_id,
+            name=_extract_name_from_payload(data, obj_id),
+            class_id=data.get("class_id"),
+            class_name=data.get("class_name"),
+            properties=props,
+            parent_ids=_normalize_parent_ids(data.get("parent_id")),
+        )
+
+
+def _has_real_name(obj: dict[str, Any] | None, obj_id: str) -> bool:
+    name = _extract_name_from_payload(obj, obj_id) if obj else None
+    return name is not None
+
+
+def _extract_name_from_payload(data: dict[str, Any] | None, obj_id: str) -> str | None:
+    if not data:
+        return None
+    for key in ("name", "displayName", "caption", "title"):
+        value = data.get(key)
+        if isinstance(value, str):
+            stripped = value.strip()
+            if stripped and stripped != str(obj_id):
+                return stripped
+    return None
 
 
 def _normalize_parent_ids(value: Any) -> list[str]:
