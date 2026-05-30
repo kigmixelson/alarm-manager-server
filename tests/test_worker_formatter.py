@@ -136,7 +136,7 @@ def test_responsible_line_and_row_column():
     assert groups[0].rows[0].endswith("\tИванов И.И.")
 
 
-def test_responsible_omitted_when_all_members_cleared():
+def test_responsible_includes_cleared_members():
     cfg = Settings(saymon_base_url="http://saymon", incident_link_template="{saymon_base_url}/i/{id}")
     c1 = _inc("c1", status=3, status_label="cleared", avaria_owner="Иванов И.И.")
     c2 = _inc("c2", status=3, status_label="cleared", avaria_owner="Петров П.П.")
@@ -146,10 +146,10 @@ def test_responsible_omitted_when_all_members_cleared():
     )
     synth = _inc("__synth__e1", title="Router-A", is_synthetic=True)
     groups = build_groups([synth, c1, c2], grouping, cfg, show_responsible=True)
-    assert groups[0].responsible_line is None
+    assert groups[0].responsible_line == "ответственные: Иванов И.И., Петров П.П."
 
 
-def test_responsible_uses_only_active_members():
+def test_responsible_on_active_and_cleared_rows():
     cfg = Settings(saymon_base_url="http://saymon", incident_link_template="{saymon_base_url}/i/{id}")
     active = _inc("a1", status=2, status_label="warning", avaria_owner="Иванов И.И.")
     cleared = _inc(
@@ -161,12 +161,10 @@ def test_responsible_uses_only_active_members():
     )
     grouping = GroupingResult(children_of={"a1": ["c1"]}, parent_of={"c1": "a1"})
     groups = build_groups([active, cleared], grouping, cfg, show_responsible=True)
-    assert groups[0].responsible_line == "ответственный: Иванов И.И."
+    assert groups[0].responsible_line == "ответственные: Иванов И.И., Петров П.П."
     rows = [r.split("\t") for r in groups[0].rows]
-    active_row = next(row for row in rows if row[-1] == "Иванов И.И.")
-    cleared_row = next(row for row in rows if row[0] == "cleared")
-    assert active_row[-1] == "Иванов И.И."
-    assert cleared_row[-1] == ""
+    assert any(row[-1] == "Иванов И.И." for row in rows)
+    assert any(row[-1] == "Петров П.П." for row in rows)
 
 
 def test_object_display_name_used_in_compact_row():

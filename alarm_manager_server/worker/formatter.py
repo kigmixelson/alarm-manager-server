@@ -64,8 +64,7 @@ def _format_incident_row(
     else:
         closed = " " * closed_width
     text = _incident_text(inc)
-    show_row_responsible = show_responsible and not is_cleared_incident(inc)
-    responsible = (inc.avaria_owner or "").strip() if show_row_responsible else ""
+    responsible = (inc.avaria_owner or "").strip() if show_responsible else ""
 
     if is_child:
         parts = [state, _object_name(inc), opened, closed, text]
@@ -73,7 +72,7 @@ def _format_incident_row(
         parts = [state, opened, closed, text, inc.id]
 
     if show_responsible:
-        parts.append(responsible if show_row_responsible else "")
+        parts.append(responsible)
     return "\t".join(parts)
 
 
@@ -84,8 +83,7 @@ def _group_responsible_line(
 ) -> str | None:
     if not show_responsible:
         return None
-    active = [inc for inc in members if not is_cleared_incident(inc)]
-    owners = sorted({(inc.avaria_owner or "").strip() for inc in active if (inc.avaria_owner or "").strip()})
+    owners = sorted({(inc.avaria_owner or "").strip() for inc in members if (inc.avaria_owner or "").strip()})
     if not owners:
         return None
     if len(owners) == 1:
