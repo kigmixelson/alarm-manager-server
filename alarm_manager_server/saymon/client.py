@@ -3,12 +3,19 @@
 from __future__ import annotations
 
 import asyncio
+import logging
+import re
 from typing import Any
 
 import httpx
 
 from alarm_manager_server.config import Settings
 from alarm_manager_server.saymon.auth import SaymonAuthError, csrf_headers, require_session_cookies
+from alarm_manager_server.saymon.response import coerce_json_list
+
+logger = logging.getLogger(__name__)
+
+_COOKIE_PAIR = re.compile(r"(?P<name>sid|csrf)=(?P<value>[^;]+)")
 
 
 class SaymonClient:
@@ -49,15 +56,18 @@ class SaymonClient:
         self._authenticated = False
 
     async def get_incidents(self, limit: int = 200) -> list[dict[str, Any]]:
-        return await self._get_json(f"/incidents?limit={limit}&skip=0&owner=true")
+        data = await self._get_json(f"/incidents?limit={limit}&skip=0&owner=true")
+        return coerce_json_list(data, label="GET /incidents")
 
     async def get_incident_history(self, limit: int = 3000) -> list[dict[str, Any]]:
-        return await self._get_json(
+        data = await self._get_json(
             f"/incident-history?inverse=true&limit={limit}&skip=0&owner=false"
         )
+        return coerce_json_list(data, label="GET /incident-history")
 
     async def get_classes(self) -> list[dict[str, Any]]:
-        return await self._get_json("/classes")
+        data = await self._get_json("/classes")
+        return coerce_json_list(data, label="GET /classes")
 
     async def get_object(self, obj_id: str) -> dict[str, Any] | None:
         try:
@@ -133,19 +143,29 @@ class SaymonClient:
                 headers={"Content-Type": "application/json", "Accept": "application/json"},
             )
             if response.status_code != 200:
+                body = response.text[:300]
                 raise SaymonAuthError(
                     f"POST /users/session failed with status {response.status_code}"
+                    + (f": {body}" if body else "")
                 )
 
+            _absorb_session_cookies(client, response)
             require_session_cookies(client.cookies)
 
             if self._auth_redirect_url:
                 redirect_target = self._resolve_redirect_url(self._auth_redirect_url)
-                redirect_response = await client.get(
-                    redirect_target,
-                    headers=csrf_headers(client.cookies),
-                )
-                redirect_response.raise_for_status()
+                try:
+                    redirect_response = await client.get(
+                        redirect_target,
+                        headers=csrf_headers(client.cookies),
+                    )
+                    redirect_response.raise_for_status()
+                except httpx.HTTPError as exc:
+                    logger.warning(
+                        "SAYMON auth redirect failed (%s), continuing with session cookies: %s",
+                        redirect_target,
+                        exc,
+                    )
 
             self._authenticated = True
 
@@ -164,3 +184,13 @@ class SaymonClient:
         response = await client.get(path, headers=self._request_headers(client))
         response.raise_for_status()
         return response.json()
+
+
+def _absorb_session_cookies(client: httpx.AsyncClient, response: httpx.Response) -> None:
+    client.cookies.update(response.cookies)
+    if client.cookies.get("sid") and client.cookies.get("csrf"):
+        return
+    for header in response.headers.get_list("set-cookie"):
+        match = _COOKIE_PAIR.search(header)
+        if match:
+            client.cookies.set(match.group("name"), match.group("value"))

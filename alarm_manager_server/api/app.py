@@ -5,7 +5,8 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Query
 from pydantic import BaseModel
 
-from alarm_manager_server.config import Settings, settings
+from alarm_manager_server.api.errors import register_exception_handlers
+from alarm_manager_server.config import settings
 from alarm_manager_server.models.incident import GroupingResult, ProcessedIncident
 from alarm_manager_server.services.processor import AlarmProcessor
 
@@ -23,6 +24,7 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+register_exception_handlers(app)
 
 
 class GroupingResponse(BaseModel):

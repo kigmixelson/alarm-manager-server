@@ -68,6 +68,10 @@ python3 -m alarm_manager_server.worker --server-url http://127.0.0.1:8000 --inte
 curl -X POST http://localhost:8000/process
 ```
 
+При ошибке SAYMON или авторизации API вернёт JSON `{"detail": "..."}` (401/502), а не пустой 500. Worker выведет этот текст в лог.
+
+**Проверка:** в `.env` должны быть `SAYMON_BASE_URL`, `SAYMON_LOGIN`, `SAYMON_PASSWORD`. `SAYMON_AUTH_REDIRECT_URL` опционален; при ошибке редиректа сервер продолжит работу, если cookies сессии уже получены.
+
 ## Архитектура
 
 ```

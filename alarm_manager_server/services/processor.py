@@ -33,6 +33,8 @@ class AlarmProcessor:
 
         incidents: list[Incident] = []
         for raw in active_raw:
+            if not isinstance(raw, dict) or raw.get("id") is None:
+                continue
             inc = Incident.from_api(raw, is_history=False)
             self.store.seed_from_incident_owner(
                 inc.entity_id,
@@ -41,6 +43,8 @@ class AlarmProcessor:
             incidents.append(inc)
 
         for raw in history_raw:
+            if not isinstance(raw, dict) or raw.get("id") is None:
+                continue
             inc = Incident.from_api(raw, is_history=True)
             self.store.seed_from_incident_owner(
                 inc.entity_id,

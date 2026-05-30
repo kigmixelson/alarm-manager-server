@@ -2,17 +2,40 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class IncidentOwner(BaseModel):
     id: str = Field(alias="_id")
     name: str = ""
-    class_id: int | None = None
+    class_id: str | int | None = None
     parent_id: list[str] = Field(default_factory=list)
     properties: list[dict[str, Any]] = Field(default_factory=list)
 
     model_config = {"populate_by_name": True}
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_owner_keys(cls, data: Any) -> Any:
+        if isinstance(data, dict) and "_id" not in data and "id" in data:
+            return {**data, "_id": data["id"]}
+        return data
+
+    @field_validator("class_id", mode="before")
+    @classmethod
+    def _coerce_class_id(cls, value: Any) -> str | int | None:
+        if value is None or value == "":
+            return None
+        return value
+
+    @field_validator("parent_id", mode="before")
+    @classmethod
+    def _coerce_parent_id(cls, value: Any) -> list[str]:
+        if value is None:
+            return []
+        if isinstance(value, list):
+            return [str(v) for v in value if v is not None and str(v)]
+        return [str(value)]
 
 
 class Incident(BaseModel):
@@ -37,8 +60,7 @@ class Incident(BaseModel):
 
     @classmethod
     def from_api(cls, raw: dict[str, Any], *, is_history: bool = False) -> Incident:
-        owner_data = raw.get("owner")
-        owner = IncidentOwner.model_validate(owner_data) if owner_data else None
+        owner = _parse_owner(raw.get("owner"))
         entity_id = str(raw.get("entityId") or "")
         title = owner.name if owner else entity_id
         ts = raw.get("localTimestamp") or raw.get("timestamp")
@@ -88,6 +110,26 @@ class ProcessedIncident(Incident):
     parent_id: str | None = None
     child_ids: list[str] = Field(default_factory=list)
     display_title: str = ""
+
+
+def _parse_owner(owner_data: Any) -> IncidentOwner | None:
+    if not isinstance(owner_data, dict):
+        return None
+    try:
+        return IncidentOwner.model_validate(owner_data)
+    except Exception:
+        owner_id = owner_data.get("_id") or owner_data.get("id")
+        if owner_id is None:
+            return None
+        return IncidentOwner(
+            id=str(owner_id),
+            name=str(owner_data.get("name") or ""),
+            class_id=owner_data.get("class_id"),
+            parent_id=owner_data.get("parent_id") or [],
+            properties=owner_data.get("properties")
+            if isinstance(owner_data.get("properties"), list)
+            else [],
+        )
 
 
 def _ms_to_iso(value: Any) -> str:
