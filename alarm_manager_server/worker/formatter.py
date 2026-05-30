@@ -150,12 +150,13 @@ def build_groups(
         closed_values = [_format_display_time(inc.resolved_at) for inc in members]
         closed_width = max((len(v) for v in closed_values), default=0)
 
+        compact_rows = bool(child_ids)
         rows = [
             _format_incident_row(
                 member,
                 closed_width=closed_width,
                 show_responsible=show_responsible,
-                is_child=member.id in grouping.parent_of,
+                is_child=compact_rows,
             )
             for member in members
         ]

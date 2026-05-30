@@ -75,12 +75,14 @@ def test_open_incident_has_padded_empty_closed_column():
     assert len(groups) == 1
     assert "аварий: 2" in groups[0].stats_line
     rows = [r.split("\t") for r in groups[0].rows]
-    assert len(rows[0][2]) == len(rows[1][3])
-    assert rows[0][2].strip() == ""
-    assert rows[0][4] == "open"
+    assert len(rows[0][3]) == len(rows[1][3])
+    assert rows[0][3].strip() == ""
+    assert rows[0][1] == "Host"
     assert rows[1][1] == "Child"
     assert rows[1][3] == "01.01.2025 12:00"
     assert rows[1][4] == "disk full"
+    assert "open" not in groups[0].rows[0]
+    assert "closed" not in groups[0].rows[1]
 
 
 def test_synthetic_group_lists_children_only():
