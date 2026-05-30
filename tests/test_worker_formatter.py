@@ -128,7 +128,8 @@ def test_responsible_omitted_when_not_found():
     inc = _inc("a", avaria_owner=None)
     groups = build_groups([inc], GroupingResult(), cfg, show_responsible=True)
     assert groups[0].responsible_line is None
-    assert groups[0].rows[0].count("\t") == 4
+    assert groups[0].rows[0].count("\t") == 5
+    assert groups[0].rows[0].endswith("\t")
 
 
 def test_format_groups_separated_by_blank_line():

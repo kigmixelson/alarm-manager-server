@@ -56,6 +56,8 @@ alarm-manager-worker --once --active
 # с ответственными (строка в группе + колонка в строке аварии, если найдено)
 alarm-manager-worker --once --responsible
 
+Убедитесь, что `MACROS` в `.env` совпадает с настройками в web-интерфейсе (localStorage `ps-macros`).
+
 # цикл каждые 60 с (SERVER_URL / WORKER_INTERVAL_SEC в .env)
 alarm-manager-worker
 

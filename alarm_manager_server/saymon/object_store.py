@@ -177,15 +177,15 @@ class ObjectStore:
 
     async def get_object_with_props(self, obj_id: str) -> dict[str, Any] | None:
         obj = self.peek_object(obj_id)
-        if obj and obj.get("has_props"):
+        if obj and obj.get("has_props") and isinstance(obj.get("properties"), list):
             return obj
-        if self._client is None:
-            return obj
-        props_data = await self._client.get_object_props(obj_id)
-        if props_data:
-            props = props_data if isinstance(props_data, list) else props_data.get("properties", [])
-            self.upsert_object(obj_id, properties=props if isinstance(props, list) else [])
-        return self.peek_object(obj_id)
+        return await self.fetch_object_full(obj_id)
+
+    async def prefetch_ancestor_chains(self, entity_ids: set[str]) -> None:
+        ids = {str(i) for i in entity_ids if i}
+        if not ids:
+            return
+        await asyncio.gather(*(self.get_ancestor_chain(i) for i in ids))
 
     async def get_ancestor_chain(self, entity_id: str) -> list[str]:
         entity_id = str(entity_id)
@@ -220,8 +220,9 @@ class ObjectStore:
             order.append(cur)
 
             obj = self.peek_object(cur)
-            if obj is None and self._client is not None:
-                obj = await self.get_object(cur)
+            if self._client is not None:
+                if obj is None or not obj.get("has_parents"):
+                    obj = await self.get_object(cur) or obj
             if not obj or not obj.get("has_parents"):
                 return None
 

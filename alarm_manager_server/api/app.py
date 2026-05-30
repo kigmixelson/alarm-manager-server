@@ -79,9 +79,8 @@ async def process_incidents(
     all_incidents = synthetic + incidents
 
     if resolve_macros:
-        responsible = await processor.resolve_responsible_parties(
-            [i for i in all_incidents if not i.is_synthetic]
-        )
+        macro_targets = [i for i in all_incidents if not i.is_synthetic]
+        responsible = await processor.resolve_responsible_parties(macro_targets)
     else:
         responsible = {}
 

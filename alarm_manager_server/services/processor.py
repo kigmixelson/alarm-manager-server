@@ -103,7 +103,11 @@ class AlarmProcessor:
         incidents: list[Incident],
     ) -> dict[str, str | None]:
         parsed = [p for m in self.cfg.macros if (p := parse_macro(m))]
-        return await self.macro_resolver.resolve_for_incidents(incidents, parsed)
+        if not parsed:
+            return {inc.id: None for inc in incidents}
+        targets = [inc for inc in incidents if not inc.is_synthetic and inc.entity_id]
+        await self.store.prefetch_ancestor_chains({inc.entity_id for inc in targets})
+        return await self.macro_resolver.resolve_for_incidents(targets, parsed)
 
     async def process(self, incidents: list[Incident] | None = None) -> list[ProcessedIncident]:
         if incidents is None:
@@ -119,9 +123,8 @@ class AlarmProcessor:
         synthetic_incidents = build_synthetic_incidents(synthetic_seeds, incidents_by_id)
 
         all_incidents = list(synthetic_incidents) + list(incidents)
-        all_responsible = await self.resolve_responsible_parties(
-            [i for i in all_incidents if not i.is_synthetic]
-        )
+        macro_targets = [i for i in all_incidents if not i.is_synthetic]
+        all_responsible = await self.resolve_responsible_parties(macro_targets)
 
         await self._prefetch_display_names(all_incidents)
         state_labels = await self.get_state_labels()

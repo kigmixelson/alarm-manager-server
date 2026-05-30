@@ -55,9 +55,7 @@ def _format_incident_row(
     text = _incident_text(inc)
     parts = [state, opened, closed, text, inc.id]
     if show_responsible:
-        owner = (inc.avaria_owner or "").strip()
-        if owner:
-            parts.append(owner)
+        parts.append((inc.avaria_owner or "").strip())
     return "\t".join(parts)
 
 

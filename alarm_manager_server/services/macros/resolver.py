@@ -20,7 +20,12 @@ class MacroResolver:
         self._depth = depth
         self._selector_match: dict[str, bool] = {}
         self._node_prop: dict[str, str | None] = {}
-        self._entity_result: dict[str, str | None] = {}
+        self._entity_result: dict[str, str] = {}
+
+    def reset_cache(self) -> None:
+        self._selector_match.clear()
+        self._node_prop.clear()
+        self._entity_result.clear()
 
     async def resolve_for_entity(self, entity_id: str, macros: list[ParsedMacro]) -> str | None:
         if not entity_id or not macros:
@@ -37,6 +42,7 @@ class MacroResolver:
         incidents: list,
         macros: list[ParsedMacro],
     ) -> dict[str, str | None]:
+        self.reset_cache()
         result: dict[str, str | None] = {}
         for inc in incidents:
             if inc.is_synthetic or not inc.entity_id:
@@ -61,7 +67,6 @@ class MacroResolver:
                 self._entity_result[cache_key] = value
                 return value
 
-        self._entity_result[cache_key] = None
         return None
 
     async def _probe_node(self, object_id: str, macro: ParsedMacro) -> str | None:
