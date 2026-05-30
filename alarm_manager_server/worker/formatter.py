@@ -15,8 +15,6 @@ class IncidentGroup:
 
 
 def _group_title(inc: ProcessedIncident) -> str:
-    if inc.is_synthetic:
-        return inc.title
     if inc.owner_display_title:
         return inc.owner_display_title
     return inc.title

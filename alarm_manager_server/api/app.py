@@ -74,6 +74,7 @@ async def process_incidents(
     _, synthetic_seeds = group_by_class(
         incidents, processor.store, class_ids, processor.cfg.group_by_depth
     )
+    await processor._enrich_synthetic_seed_names(synthetic_seeds)
     synthetic = build_synthetic_incidents(synthetic_seeds, {i.id: i for i in incidents})
     all_incidents = synthetic + incidents
 
@@ -84,7 +85,7 @@ async def process_incidents(
     else:
         responsible = {}
 
-    await processor._prefetch_owner_parent_names(all_incidents)
+    await processor._prefetch_display_names(all_incidents)
 
     processed: list[ProcessedIncident] = []
     for inc in all_incidents:

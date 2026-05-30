@@ -3,7 +3,12 @@
 from __future__ import annotations
 
 from alarm_manager_server.config import Settings, settings
-from alarm_manager_server.models.incident import GroupingResult, Incident, ProcessedIncident
+from alarm_manager_server.models.incident import (
+    GroupingResult,
+    Incident,
+    ProcessedIncident,
+    SyntheticGroupSeed,
+)
 from alarm_manager_server.services.grouping import (
     build_synthetic_incidents,
     group_by_class,
@@ -11,7 +16,7 @@ from alarm_manager_server.services.grouping import (
     merge_groupings,
 )
 from alarm_manager_server.services.macros import MacroResolver, parse_macro
-from alarm_manager_server.services.owner_display import build_owner_display_title
+from alarm_manager_server.services.owner_display import build_group_display_title
 from alarm_manager_server.saymon.client import SaymonClient
 from alarm_manager_server.saymon.object_store import ObjectStore
 
@@ -65,6 +70,7 @@ class AlarmProcessor:
             class_ids,
             self.cfg.group_by_depth,
         )
+        await self._enrich_synthetic_seed_names(synthetic_seeds)
 
         incidents_by_id = {inc.id: inc for inc in incidents}
         synthetic_incidents = build_synthetic_incidents(synthetic_seeds, incidents_by_id)
@@ -96,7 +102,7 @@ class AlarmProcessor:
             [i for i in all_incidents if not i.is_synthetic]
         )
 
-        await self._prefetch_owner_parent_names(all_incidents)
+        await self._prefetch_display_names(all_incidents)
 
         result: list[ProcessedIncident] = []
         for inc in all_incidents:
@@ -110,13 +116,25 @@ class AlarmProcessor:
 
         return result
 
-    async def _prefetch_owner_parent_names(self, incidents: list[Incident]) -> None:
-        parent_ids = {
-            inc.owner.parent_id[0]
-            for inc in incidents
-            if inc.owner and len(inc.owner.parent_id) == 1 and inc.owner.parent_id[0]
-        }
-        await self.store.prefetch_object_names(parent_ids)
+    async def _enrich_synthetic_seed_names(self, seeds: list[SyntheticGroupSeed]) -> None:
+        if not seeds:
+            return
+        await self.store.prefetch_object_names({seed.entity_id for seed in seeds})
+        for seed in seeds:
+            if not seed.name or seed.name == seed.entity_id:
+                seed.name = await self.store.resolve_object_name(seed.entity_id)
+
+    async def _prefetch_display_names(self, incidents: list[Incident]) -> None:
+        object_ids: set[str] = set()
+        for inc in incidents:
+            if inc.is_synthetic and inc.entity_id:
+                object_ids.add(inc.entity_id)
+                continue
+            if inc.owner and len(inc.owner.parent_id) == 1 and inc.owner.parent_id[0]:
+                object_ids.add(inc.owner.parent_id[0])
+            if inc.entity_id and (not inc.owner or not inc.owner.name.strip()):
+                object_ids.add(inc.entity_id)
+        await self.store.prefetch_object_names(object_ids)
 
     async def _to_processed_incident(
         self,
@@ -135,10 +153,7 @@ class AlarmProcessor:
             and parent_title != inc.title
         )
         display_title = f"{inc.title} ({parent_title})" if show_suffix else inc.title
-        if inc.is_synthetic:
-            owner_display_title = inc.title
-        else:
-            owner_display_title = await build_owner_display_title(inc, self.store)
+        owner_display_title = await build_group_display_title(inc, self.store)
 
         return ProcessedIncident(
             **inc.model_dump(),

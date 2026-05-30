@@ -253,7 +253,7 @@ class ObjectStore:
                     parents_of.setdefault(child, set()).add(parent)
 
         for obj in objects:
-            obj_id = str(obj.get("_id") or obj.get("id") or "")
+            obj_id = str(obj.get("id") or obj.get("_id") or "")
             if not obj_id:
                 continue
             direct = _normalize_parent_ids(obj.get("parent_id"))
