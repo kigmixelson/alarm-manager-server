@@ -8,6 +8,8 @@ from datetime import datetime
 from alarm_manager_server.config import Settings
 from alarm_manager_server.models.incident import GroupingResult, ProcessedIncident, get_opened_at_ms
 
+CLEARED_STATE_ID = 3
+
 
 @dataclass(frozen=True)
 class IncidentGroup:
@@ -61,10 +63,23 @@ def _sort_members(members: list[ProcessedIncident]) -> list[ProcessedIncident]:
     return sorted(members, key=get_opened_at_ms, reverse=True)
 
 
+def is_cleared_incident(inc: ProcessedIncident) -> bool:
+    if str(inc.status) == str(CLEARED_STATE_ID):
+        return True
+    label = (inc.status_label or "").casefold()
+    return label in {"cleared", "закрыта", "закрыто"}
+
+
+def is_all_cleared_group(members: list[ProcessedIncident]) -> bool:
+    return bool(members) and all(is_cleared_incident(inc) for inc in members)
+
+
 def build_groups(
     incidents: list[ProcessedIncident],
     grouping: GroupingResult,
     cfg: Settings,
+    *,
+    active_only: bool = False,
 ) -> list[IncidentGroup]:
     """Top-level rows only; children are folded into their parent group."""
     del cfg  # reserved for future output options
@@ -87,6 +102,9 @@ def build_groups(
             member_ids = [inc.id]
 
         members = [by_id[mid] for mid in member_ids if mid in by_id and not by_id[mid].is_synthetic]
+        if active_only and is_all_cleared_group(members):
+            continue
+
         members = _sort_members(members)
 
         closed_values = [_format_display_time(inc.resolved_at) for inc in members]

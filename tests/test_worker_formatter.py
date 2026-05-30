@@ -4,6 +4,8 @@ from alarm_manager_server.worker.formatter import (
     IncidentGroup,
     build_groups,
     format_groups,
+    is_all_cleared_group,
+    is_cleared_incident,
 )
 
 
@@ -15,6 +17,7 @@ def _inc(
     is_synthetic: bool = False,
     started_at: str = "2025-01-01T10:00:00+00:00",
     resolved_at: str | None = None,
+    status: int | str = 2,
     status_label: str = "critical",
     text: str = "disk full",
 ) -> ProcessedIncident:
@@ -24,7 +27,7 @@ def _inc(
         display_title=title,
         owner_display_title=owner_display_title or title,
         severity=1,
-        status=3,
+        status=status,
         status_label=status_label,
         started_at=started_at,
         resolved_at=resolved_at,
@@ -87,6 +90,27 @@ def test_synthetic_group_lists_children_only():
     assert "аварий: 2" in groups[0].stats_line
     assert len(groups[0].rows) == 2
     assert all("c1" in r or "c2" in r for r in groups[0].rows)
+
+
+def test_active_only_skips_all_cleared_group():
+    cfg = Settings(saymon_base_url="http://saymon", incident_link_template="{saymon_base_url}/i/{id}")
+    cleared = _inc("c1", status=3, status_label="cleared", resolved_at="2025-01-01T11:00:00+00:00")
+    open_inc = _inc("o1", status=2, status_label="warning")
+    grouping = GroupingResult()
+    all_groups = build_groups([cleared], grouping, cfg, active_only=False)
+    active_groups = build_groups([cleared, open_inc], grouping, cfg, active_only=True)
+    assert len(all_groups) == 1
+    assert len(active_groups) == 1
+    assert active_groups[0].rows[0].endswith("o1")
+    only_cleared = build_groups([cleared], grouping, cfg, active_only=True)
+    assert only_cleared == []
+
+
+def test_is_cleared_by_status_label():
+    assert is_cleared_incident(_inc("x", status=2, status_label="cleared"))
+    assert is_cleared_incident(_inc("x", status=3, status_label=""))
+    assert not is_cleared_incident(_inc("x", status=2, status_label="warning"))
+    assert is_all_cleared_group([_inc("a", status=3, status_label="cleared")])
 
 
 def test_format_groups_separated_by_blank_line():

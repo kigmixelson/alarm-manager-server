@@ -50,6 +50,9 @@ python3 -m uvicorn alarm_manager_server.api.app:app --reload --port 8000
 # один проход
 alarm-manager-worker --once
 
+# только группы с не-Cleared авариями
+alarm-manager-worker --once --active
+
 # цикл каждые 60 с (SERVER_URL / WORKER_INTERVAL_SEC в .env)
 alarm-manager-worker
 

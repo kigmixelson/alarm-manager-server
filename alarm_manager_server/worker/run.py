@@ -15,9 +15,14 @@ from alarm_manager_server.worker.formatter import build_groups, format_groups
 logger = logging.getLogger(__name__)
 
 
-async def run_once(client: ProcessApiClient, *, resolve_macros: bool) -> None:
+async def run_once(
+    client: ProcessApiClient,
+    *,
+    resolve_macros: bool,
+    active_only: bool,
+) -> None:
     incidents, grouping = await client.process(resolve_macros=resolve_macros)
-    groups = build_groups(incidents, grouping, settings)
+    groups = build_groups(incidents, grouping, settings, active_only=active_only)
     text = format_groups(groups)
     stamp = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
     print(f"--- {stamp} — {len(groups)} group(s) ---", flush=True)
@@ -32,10 +37,11 @@ async def run_loop(
     *,
     interval_sec: float,
     resolve_macros: bool,
+    active_only: bool,
 ) -> None:
     while True:
         try:
-            await run_once(client, resolve_macros=resolve_macros)
+            await run_once(client, resolve_macros=resolve_macros, active_only=active_only)
         except Exception:
             logger.exception("processing failed")
         await asyncio.sleep(interval_sec)
@@ -67,6 +73,11 @@ def main(argv: list[str] | None = None) -> None:
         help="Skip responsible-party macro resolution on the server",
     )
     parser.add_argument(
+        "--active",
+        action="store_true",
+        help="Hide groups where all incidents are Cleared",
+    )
+    parser.add_argument(
         "-v",
         "--verbose",
         action="store_true",
@@ -81,11 +92,14 @@ def main(argv: list[str] | None = None) -> None:
 
     interval = 0.0 if args.once else args.interval
     resolve_macros = not args.no_macros
+    active_only = args.active
     client = ProcessApiClient(args.server_url)
 
     if interval <= 0:
         try:
-            asyncio.run(run_once(client, resolve_macros=resolve_macros))
+            asyncio.run(
+                run_once(client, resolve_macros=resolve_macros, active_only=active_only),
+            )
         except KeyboardInterrupt:
             sys.exit(130)
         except Exception:
@@ -96,7 +110,12 @@ def main(argv: list[str] | None = None) -> None:
     logger.info("Worker started: %s every %.0fs", args.server_url, interval)
     try:
         asyncio.run(
-            run_loop(client, interval_sec=interval, resolve_macros=resolve_macros),
+            run_loop(
+                client,
+                interval_sec=interval,
+                resolve_macros=resolve_macros,
+                active_only=active_only,
+            ),
         )
     except KeyboardInterrupt:
         logger.info("Worker stopped")
