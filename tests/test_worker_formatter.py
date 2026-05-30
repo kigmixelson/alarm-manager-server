@@ -40,6 +40,20 @@ def _inc(
     )
 
 
+def test_singleton_group_omits_ids_when_object_name_is_stub():
+    cfg = Settings(saymon_base_url="http://saymon", incident_link_template="{saymon_base_url}/i/{id}")
+    inc = _inc(
+        "inc-99",
+        title="67cb1f06120ab073c5adb78c",
+        object_display_name="PSU.#1@R2",
+    )
+    groups = build_groups([inc], GroupingResult(), cfg)
+    row = groups[0].rows[0]
+    assert "inc-99" not in row
+    assert "67cb1f06120ab073c5adb78c" not in row
+    assert row.split("\t")[1] == "PSU.#1@R2"
+
+
 def test_singleton_group_header_and_tab_row():
     cfg = Settings(saymon_base_url="http://saymon", incident_link_template="{saymon_base_url}/i/{id}")
     incidents = [

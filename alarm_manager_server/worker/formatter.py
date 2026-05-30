@@ -6,7 +6,12 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from alarm_manager_server.config import Settings
-from alarm_manager_server.models.incident import GroupingResult, ProcessedIncident, get_opened_at_ms
+from alarm_manager_server.models.incident import (
+    GroupingResult,
+    ProcessedIncident,
+    get_opened_at_ms,
+    is_placeholder_object_name,
+)
 
 CLEARED_STATE_ID = 3
 
@@ -41,16 +46,12 @@ def _incident_text(inc: ProcessedIncident) -> str:
 
 
 def _object_name(inc: ProcessedIncident) -> str:
-    if inc.object_display_name.strip():
+    if inc.object_display_name.strip() and not is_placeholder_object_name(inc.object_display_name, inc):
         return inc.object_display_name.strip()
-    if inc.owner and inc.owner.name.strip():
+    if inc.owner and inc.owner.name.strip() and not is_placeholder_object_name(inc.owner.name, inc):
         return inc.owner.name.strip()
-    if inc.title.strip() and inc.title.strip() not in {inc.entity_id, inc.id}:
+    if inc.title.strip() and not is_placeholder_object_name(inc.title, inc):
         return inc.title.strip()
-    if inc.entity_id.strip():
-        return inc.entity_id.strip()
-    if inc.owner and inc.owner.id.strip():
-        return inc.owner.id.strip()
     return "—"
 
 

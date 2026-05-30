@@ -181,3 +181,20 @@ def incident_object_id(incident: Incident) -> str:
     if incident.owner and incident.owner.id:
         return incident.owner.id
     return ""
+
+
+def is_placeholder_object_name(name: str, incident: Incident) -> bool:
+    """True when a name field is empty or equals incident/object id (not a real label)."""
+    stripped = name.strip()
+    if not stripped:
+        return True
+    if stripped == incident.id:
+        return True
+    object_id = incident_object_id(incident)
+    if object_id and stripped == object_id:
+        return True
+    if incident.entity_id and stripped == incident.entity_id:
+        return True
+    if incident.owner and stripped == incident.owner.id:
+        return True
+    return False

@@ -1,4 +1,4 @@
-from alarm_manager_server.models.incident import ProcessedIncident
+from alarm_manager_server.models.incident import IncidentOwner, ProcessedIncident
 from alarm_manager_server.worker.formatter import _format_incident_row
 
 
@@ -45,6 +45,29 @@ def test_row_uses_object_name_and_omits_incident_id():
     assert cols[2] == "01.01.2025 10:00"
     assert cols[4] == "alert"
     assert "child-id" not in row
+
+
+def test_singleton_row_shows_dash_not_object_id_stub():
+    row = _format_incident_row(
+        ProcessedIncident(
+            id="inc-99",
+            title="67cb1f06120ab073c5adb78c",
+            object_display_name="67cb1f06120ab073c5adb78c",
+            severity=1,
+            status=2,
+            status_label="warning",
+            started_at="2025-01-01T10:00:00+00:00",
+            text="alert",
+            entity_id="67cb1f06120ab073c5adb78c",
+            owner=IncidentOwner(_id="67cb1f06120ab073c5adb78c", name="67cb1f06120ab073c5adb78c"),
+        ),
+        closed_width=0,
+        show_responsible=False,
+    )
+    cols = row.split("\t")
+    assert cols[1] == "—"
+    assert "inc-99" not in row
+    assert "67cb1f06120ab073c5adb78c" not in row
 
 
 def test_singleton_row_uses_object_column_not_incident_id():

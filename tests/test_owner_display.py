@@ -23,6 +23,31 @@ def _incident(*, title: str = "Child-svc", parent_ids: list[str] | None = None) 
 
 
 @pytest.mark.asyncio
+async def test_stub_owner_name_is_resolved_via_api():
+    class FakeClient:
+        async def get_object(self, obj_id: str):
+            return {"_id": obj_id, "name": "PSU.#1@R2", "properties": [], "class_id": 1}
+
+        async def get_object_paths(self, obj_id: str):
+            return None
+
+    store = ObjectStore(FakeClient())
+    inc = Incident(
+        id="inc-99",
+        title="67cb1f06120ab073c5adb78c",
+        severity=1,
+        status=1,
+        started_at="2025-01-01T00:00:00+00:00",
+        entity_id="67cb1f06120ab073c5adb78c",
+        owner=IncidentOwner(_id="67cb1f06120ab073c5adb78c", name="67cb1f06120ab073c5adb78c"),
+    )
+    text = await build_owner_display_title(inc, store)
+    assert text == "PSU.#1@R2"
+    assert "67cb1f06120ab073c5adb78c" not in text
+    assert "inc-99" not in text
+
+
+@pytest.mark.asyncio
 async def test_no_parents_returns_owner_name_only():
     store = ObjectStore()
     assert await build_owner_display_title(_incident(parent_ids=[]), store) == "Child-svc"

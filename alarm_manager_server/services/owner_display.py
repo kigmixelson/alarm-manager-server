@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from alarm_manager_server.models.incident import Incident, incident_object_id
+from alarm_manager_server.models.incident import Incident, incident_object_id, is_placeholder_object_name
 from alarm_manager_server.saymon.object_store import ObjectStore
 
 
@@ -34,8 +34,12 @@ async def build_owner_display_title(incident: Incident, store: ObjectStore) -> s
 
 async def _incident_owner_base_name(incident: Incident, store: ObjectStore) -> str:
     if incident.owner and incident.owner.name.strip():
-        return incident.owner.name.strip()
+        name = incident.owner.name.strip()
+        if not is_placeholder_object_name(name, incident):
+            return name
     object_id = incident_object_id(incident)
     if object_id:
         return await store.resolve_object_name(object_id)
-    return incident.title
+    if incident.title.strip() and not is_placeholder_object_name(incident.title, incident):
+        return incident.title.strip()
+    return incident.title or "—"
