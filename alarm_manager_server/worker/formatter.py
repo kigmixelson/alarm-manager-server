@@ -55,6 +55,70 @@ def _object_name(inc: ProcessedIncident) -> str:
     return "—"
 
 
+def _row_signature(inc: ProcessedIncident) -> tuple[str, str, str]:
+    """Same state + object + text → repeated alarm in a group."""
+    return (
+        inc.status_label or str(inc.status),
+        _object_name(inc),
+        _incident_text(inc),
+    )
+
+
+def _collapse_repeated_member_rows(
+    members: list[ProcessedIncident],
+    *,
+    closed_width: int,
+    show_responsible: bool,
+    show_row_responsible: bool,
+) -> list[str]:
+    """For 3+ identical alarms show newest, '...', oldest; keep full count in stats."""
+    buckets: dict[tuple[str, str, str], list[ProcessedIncident]] = {}
+    bucket_order: list[tuple[str, str, str]] = []
+    for member in members:
+        sig = _row_signature(member)
+        if sig not in buckets:
+            buckets[sig] = []
+            bucket_order.append(sig)
+        buckets[sig].append(member)
+
+    rows: list[str] = []
+    for sig in bucket_order:
+        group = buckets[sig]
+        if len(group) < 3:
+            for inc in group:
+                rows.append(
+                    _format_incident_row(
+                        inc,
+                        closed_width=closed_width,
+                        show_responsible=show_responsible,
+                        show_row_responsible=show_row_responsible,
+                    )
+                )
+            continue
+
+        ordered = sorted(group, key=get_opened_at_ms)
+        first = ordered[0]
+        last = ordered[-1]
+        rows.append(
+            _format_incident_row(
+                last,
+                closed_width=closed_width,
+                show_responsible=show_responsible,
+                show_row_responsible=show_row_responsible,
+            )
+        )
+        rows.append("...")
+        rows.append(
+            _format_incident_row(
+                first,
+                closed_width=closed_width,
+                show_responsible=show_responsible,
+                show_row_responsible=show_row_responsible,
+            )
+        )
+    return rows
+
+
 def _format_incident_row(
     inc: ProcessedIncident,
     *,
@@ -129,15 +193,12 @@ def _make_incident_group(
     closed_values = [_format_display_time(inc.resolved_at) for inc in members]
     closed_width = max((len(v) for v in closed_values), default=0)
     show_row_responsible = show_responsible and len(members) == 1
-    rows = [
-        _format_incident_row(
-            member,
-            closed_width=closed_width,
-            show_responsible=show_responsible,
-            show_row_responsible=show_row_responsible,
-        )
-        for member in members
-    ]
+    rows = _collapse_repeated_member_rows(
+        members,
+        closed_width=closed_width,
+        show_responsible=show_responsible,
+        show_row_responsible=show_row_responsible,
+    )
     return IncidentGroup(
         title=_group_title(head),
         stats_line=_group_stats_line(members),

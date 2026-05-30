@@ -215,6 +215,55 @@ def test_responsible_omitted_when_not_found():
     assert groups[0].rows[0].endswith("\t")
 
 
+def test_repeated_same_alarm_collapsed_to_last_ellipsis_first():
+    cfg = Settings(saymon_base_url="http://saymon", incident_link_template="{saymon_base_url}/i/{id}")
+    shared = dict(
+        object_display_name="PBX-2 CAPS ALL IN",
+        text="PBX-2 CAPS ALL IN",
+        status=3,
+        status_label="Cleared",
+        resolved_at="2025-05-30T17:00:00+00:00",
+    )
+    incs = [
+        _inc("c1", started_at="2025-05-24T06:32:00+00:00", **shared),
+        _inc("c2", started_at="2025-05-25T10:00:00+00:00", **shared),
+        _inc("c3", started_at="2025-05-30T16:55:00+00:00", **shared),
+    ]
+    synth = _inc("__synth__e1", title="PBX-2 CAPS ALL IN", is_synthetic=True)
+    grouping = GroupingResult(
+        children_of={"__synth__e1": ["c1", "c2", "c3"]},
+        parent_of={"c1": "__synth__e1", "c2": "__synth__e1", "c3": "__synth__e1"},
+    )
+    groups = build_groups([synth, *incs], grouping, cfg)
+    assert "аварий: 3" in groups[0].stats_line
+    assert len(groups[0].rows) == 3
+    assert groups[0].rows[1] == "..."
+    assert "30.05.2026 16:55" in groups[0].rows[0]
+    assert "24.05.2026 06:32" in groups[0].rows[2]
+
+
+def test_two_repeated_alarms_not_collapsed():
+    cfg = Settings(saymon_base_url="http://saymon", incident_link_template="{saymon_base_url}/i/{id}")
+    shared = dict(
+        object_display_name="PBX-2 CAPS ALL IN",
+        text="PBX-2 CAPS ALL IN",
+        status=3,
+        status_label="Cleared",
+    )
+    incs = [
+        _inc("c1", started_at="2025-05-30T15:55:00+00:00", resolved_at="2025-05-30T16:00:00+00:00", **shared),
+        _inc("c2", started_at="2025-05-30T16:55:00+00:00", resolved_at="2025-05-30T16:56:00+00:00", **shared),
+    ]
+    synth = _inc("__synth__e1", title="PBX-2 CAPS ALL IN", is_synthetic=True)
+    grouping = GroupingResult(
+        children_of={"__synth__e1": ["c1", "c2"]},
+        parent_of={"c1": "__synth__e1", "c2": "__synth__e1"},
+    )
+    groups = build_groups([synth, *incs], grouping, cfg)
+    assert len(groups[0].rows) == 2
+    assert "..." not in groups[0].rows
+
+
 def test_build_groups_shows_orphan_child_missing_from_parent_member_list():
     cfg = Settings(saymon_base_url="http://saymon", incident_link_template="{saymon_base_url}/i/{id}")
     parent = _inc("parent", status=2, status_label="warning", owner_display_title="Parent")
