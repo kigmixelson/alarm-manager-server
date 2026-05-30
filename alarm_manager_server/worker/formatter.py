@@ -45,9 +45,13 @@ def _object_name(inc: ProcessedIncident) -> str:
         return inc.object_display_name.strip()
     if inc.owner and inc.owner.name.strip():
         return inc.owner.name.strip()
-    if inc.title.strip() and inc.title.strip() != inc.entity_id:
+    if inc.title.strip() and inc.title.strip() not in {inc.entity_id, inc.id}:
         return inc.title.strip()
-    return inc.entity_id or inc.id
+    if inc.entity_id.strip():
+        return inc.entity_id.strip()
+    if inc.owner and inc.owner.id.strip():
+        return inc.owner.id.strip()
+    return "—"
 
 
 def _format_incident_row(
@@ -55,7 +59,6 @@ def _format_incident_row(
     *,
     closed_width: int,
     show_responsible: bool,
-    is_child: bool,
 ) -> str:
     state = inc.status_label or str(inc.status)
     opened = _format_display_time(inc.started_at)
@@ -66,11 +69,7 @@ def _format_incident_row(
     text = _incident_text(inc)
     responsible = (inc.avaria_owner or "").strip() if show_responsible else ""
 
-    if is_child:
-        parts = [state, _object_name(inc), opened, closed, text]
-    else:
-        parts = [state, opened, closed, text, inc.id]
-
+    parts = [state, _object_name(inc), opened, closed, text]
     if show_responsible:
         parts.append(responsible)
     return "\t".join(parts)
@@ -152,13 +151,11 @@ def build_groups(
         closed_values = [_format_display_time(inc.resolved_at) for inc in members]
         closed_width = max((len(v) for v in closed_values), default=0)
 
-        compact_rows = bool(child_ids)
         rows = [
             _format_incident_row(
                 member,
                 closed_width=closed_width,
                 show_responsible=show_responsible,
-                is_child=compact_rows,
             )
             for member in members
         ]

@@ -6,6 +6,7 @@ from alarm_manager_server.models.incident import (
     GroupingResult,
     Incident,
     SyntheticGroupSeed,
+    incident_object_id,
     is_active,
 )
 from alarm_manager_server.saymon.object_store import ObjectStore, ResolvedNode
@@ -15,15 +16,16 @@ def _build_incident_by_entity(incidents: list[Incident]) -> dict[str, str]:
     by_id = {a.id: a for a in incidents}
     result: dict[str, str] = {}
     for inc in incidents:
-        if not inc.entity_id:
+        object_id = incident_object_id(inc)
+        if not object_id:
             continue
-        existing_id = result.get(inc.entity_id)
+        existing_id = result.get(object_id)
         if not existing_id:
-            result[inc.entity_id] = inc.id
+            result[object_id] = inc.id
             continue
         existing = by_id.get(existing_id)
         if existing and not is_active(existing) and is_active(inc):
-            result[inc.entity_id] = inc.id
+            result[object_id] = inc.id
     return result
 
 
@@ -45,7 +47,7 @@ def group_by_class(
     by_id = {x.id: x for x in incidents}
 
     for inc in incidents:
-        entity = inc.entity_id
+        entity = incident_object_id(inc)
         if not entity:
             continue
 

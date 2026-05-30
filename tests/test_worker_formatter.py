@@ -57,10 +57,11 @@ def test_singleton_group_header_and_tab_row():
     assert "02.01.2025" in groups[0].stats_line
     row = groups[0].rows[0].split("\t")
     assert row[0] == "critical"
-    assert row[1] == "02.01.2025 12:00"
-    assert row[2] == "02.01.2025 13:00"
-    assert row[3] == "disk full"
-    assert row[4] == "a"
+    assert row[1] == "Host"
+    assert row[2] == "02.01.2025 12:00"
+    assert row[3] == "02.01.2025 13:00"
+    assert row[4] == "disk full"
+    assert "a" not in row
 
 
 def test_open_incident_has_padded_empty_closed_column():
@@ -116,7 +117,8 @@ def test_active_only_skips_all_cleared_group():
     active_groups = build_groups([cleared, open_inc], grouping, cfg, active_only=True)
     assert len(all_groups) == 1
     assert len(active_groups) == 1
-    assert active_groups[0].rows[0].endswith("o1")
+    assert "o1" not in active_groups[0].rows[0]
+    assert "warning" in active_groups[0].rows[0]
     only_cleared = build_groups([cleared], grouping, cfg, active_only=True)
     assert only_cleared == []
 

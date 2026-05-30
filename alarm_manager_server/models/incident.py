@@ -172,3 +172,12 @@ def get_opened_at_ms(incident: Incident) -> int:
 
 def is_active(incident: Incident) -> bool:
     return not incident.is_history
+
+
+def incident_object_id(incident: Incident) -> str:
+    """SAYMON object id for macros and name resolution (entityId or owner._id)."""
+    if incident.entity_id:
+        return incident.entity_id
+    if incident.owner and incident.owner.id:
+        return incident.owner.id
+    return ""

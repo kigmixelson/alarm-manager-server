@@ -8,6 +8,7 @@ from alarm_manager_server.models.incident import (
     Incident,
     ProcessedIncident,
     SyntheticGroupSeed,
+    incident_object_id,
 )
 from alarm_manager_server.services.grouping import (
     build_synthetic_incidents,
@@ -67,7 +68,7 @@ class AlarmProcessor:
                 continue
             inc = Incident.from_api(raw, is_history=False)
             self.store.seed_from_incident_owner(
-                inc.entity_id,
+                incident_object_id(inc),
                 raw.get("owner") if isinstance(raw.get("owner"), dict) else None,
             )
             incidents.append(inc)
@@ -77,7 +78,7 @@ class AlarmProcessor:
                 continue
             inc = Incident.from_api(raw, is_history=True)
             self.store.seed_from_incident_owner(
-                inc.entity_id,
+                incident_object_id(inc),
                 raw.get("owner") if isinstance(raw.get("owner"), dict) else None,
             )
             incidents.append(inc)
@@ -108,8 +109,8 @@ class AlarmProcessor:
         parsed = [p for m in self.cfg.macros if (p := parse_macro(m))]
         if not parsed:
             return {inc.id: None for inc in incidents}
-        targets = [inc for inc in incidents if not inc.is_synthetic and inc.entity_id]
-        await self.store.prefetch_ancestor_chains({inc.entity_id for inc in targets})
+        targets = [inc for inc in incidents if not inc.is_synthetic and incident_object_id(inc)]
+        await self.store.prefetch_ancestor_chains({incident_object_id(inc) for inc in targets})
         return await self.macro_resolver.resolve_for_incidents(targets, parsed)
 
     async def process(self, incidents: list[Incident] | None = None) -> list[ProcessedIncident]:
@@ -160,8 +161,10 @@ class AlarmProcessor:
                 if inc.entity_id:
                     object_ids.add(inc.entity_id)
                 continue
-            if inc.entity_id:
-                object_ids.add(inc.entity_id)
+            if not inc.is_synthetic:
+                object_id = incident_object_id(inc)
+                if object_id:
+                    object_ids.add(object_id)
             if inc.owner and len(inc.owner.parent_id) == 1 and inc.owner.parent_id[0]:
                 object_ids.add(inc.owner.parent_id[0])
         await self.store.prefetch_object_names(object_ids)

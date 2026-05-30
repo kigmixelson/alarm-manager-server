@@ -7,7 +7,7 @@ from alarm_manager_server.services.macros.parser import (
     object_matches_selector,
     pick_property,
 )
-from alarm_manager_server.saymon.object_store import ObjectStore
+from alarm_manager_server.models.incident import incident_object_id
 
 
 def _selector_key(sel) -> str:
@@ -44,11 +44,18 @@ class MacroResolver:
     ) -> dict[str, str | None]:
         self.reset_cache()
         result: dict[str, str | None] = {}
+        by_entity: dict[str, str | None] = {}
         for inc in incidents:
-            if inc.is_synthetic or not inc.entity_id:
+            if inc.is_synthetic:
                 result[inc.id] = None
                 continue
-            result[inc.id] = await self.resolve_for_entity(inc.entity_id, macros)
+            entity_id = incident_object_id(inc)
+            if not entity_id:
+                result[inc.id] = None
+                continue
+            if entity_id not in by_entity:
+                by_entity[entity_id] = await self.resolve_for_entity(entity_id, macros)
+            result[inc.id] = by_entity[entity_id]
         return result
 
     async def _resolve_one(self, entity_id: str, macro: ParsedMacro) -> str | None:
