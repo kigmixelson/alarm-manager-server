@@ -66,6 +66,7 @@ def test_open_incident_has_padded_empty_closed_column():
     open_inc = _inc("open", started_at="2025-01-01T10:00:00+00:00", resolved_at=None)
     closed_inc = _inc(
         "closed",
+        title="Child",
         started_at="2025-01-01T11:00:00+00:00",
         resolved_at="2025-01-01T12:00:00+00:00",
     )
@@ -74,8 +75,12 @@ def test_open_incident_has_padded_empty_closed_column():
     assert len(groups) == 1
     assert "аварий: 2" in groups[0].stats_line
     rows = [r.split("\t") for r in groups[0].rows]
-    assert len(rows[0][2]) == len(rows[1][2])
+    assert len(rows[0][2]) == len(rows[1][3])
     assert rows[0][2].strip() == ""
+    assert rows[0][4] == "open"
+    assert rows[1][1] == "Child"
+    assert rows[1][3] == "01.01.2025 12:00"
+    assert rows[1][4] == "disk full"
 
 
 def test_synthetic_group_lists_children_only():
@@ -91,7 +96,11 @@ def test_synthetic_group_lists_children_only():
     assert groups[0].title == "Router-A"
     assert "аварий: 2" in groups[0].stats_line
     assert len(groups[0].rows) == 2
-    assert all("c1" in r or "c2" in r for r in groups[0].rows)
+    for row in groups[0].rows:
+        cols = row.split("\t")
+        assert cols[1] in {"A1", "A2"}
+        assert cols[4] == "disk full"
+        assert "c1" not in row and "c2" not in row
 
 
 def test_active_only_skips_all_cleared_group():

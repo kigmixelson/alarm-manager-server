@@ -40,11 +40,20 @@ def _incident_text(inc: ProcessedIncident) -> str:
     return " ".join(text.split())
 
 
+def _object_name(inc: ProcessedIncident) -> str:
+    if inc.owner and inc.owner.name.strip():
+        return inc.owner.name.strip()
+    if inc.title.strip():
+        return inc.title.strip()
+    return inc.entity_id or inc.id
+
+
 def _format_incident_row(
     inc: ProcessedIncident,
     *,
     closed_width: int,
     show_responsible: bool,
+    is_child: bool,
 ) -> str:
     state = inc.status_label or str(inc.status)
     opened = _format_display_time(inc.started_at)
@@ -53,9 +62,15 @@ def _format_incident_row(
     else:
         closed = " " * closed_width
     text = _incident_text(inc)
-    parts = [state, opened, closed, text, inc.id]
+    responsible = (inc.avaria_owner or "").strip() if show_responsible else ""
+
+    if is_child:
+        parts = [state, _object_name(inc), opened, closed, text]
+    else:
+        parts = [state, opened, closed, text, inc.id]
+
     if show_responsible:
-        parts.append((inc.avaria_owner or "").strip())
+        parts.append(responsible)
     return "\t".join(parts)
 
 
@@ -136,8 +151,13 @@ def build_groups(
         closed_width = max((len(v) for v in closed_values), default=0)
 
         rows = [
-            _format_incident_row(inc, closed_width=closed_width, show_responsible=show_responsible)
-            for inc in members
+            _format_incident_row(
+                member,
+                closed_width=closed_width,
+                show_responsible=show_responsible,
+                is_child=member.id in grouping.parent_of,
+            )
+            for member in members
         ]
         responsible_line = _group_responsible_line(members, show_responsible=show_responsible)
         groups.append(
