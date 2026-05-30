@@ -41,9 +41,11 @@ def _incident_text(inc: ProcessedIncident) -> str:
 
 
 def _object_name(inc: ProcessedIncident) -> str:
+    if inc.object_display_name.strip():
+        return inc.object_display_name.strip()
     if inc.owner and inc.owner.name.strip():
         return inc.owner.name.strip()
-    if inc.title.strip():
+    if inc.title.strip() and inc.title.strip() != inc.entity_id:
         return inc.title.strip()
     return inc.entity_id or inc.id
 
@@ -62,7 +64,8 @@ def _format_incident_row(
     else:
         closed = " " * closed_width
     text = _incident_text(inc)
-    responsible = (inc.avaria_owner or "").strip() if show_responsible else ""
+    show_row_responsible = show_responsible and not is_cleared_incident(inc)
+    responsible = (inc.avaria_owner or "").strip() if show_row_responsible else ""
 
     if is_child:
         parts = [state, _object_name(inc), opened, closed, text]
@@ -70,7 +73,7 @@ def _format_incident_row(
         parts = [state, opened, closed, text, inc.id]
 
     if show_responsible:
-        parts.append(responsible)
+        parts.append(responsible if show_row_responsible else "")
     return "\t".join(parts)
 
 
@@ -81,7 +84,8 @@ def _group_responsible_line(
 ) -> str | None:
     if not show_responsible:
         return None
-    owners = sorted({(inc.avaria_owner or "").strip() for inc in members if (inc.avaria_owner or "").strip()})
+    active = [inc for inc in members if not is_cleared_incident(inc)]
+    owners = sorted({(inc.avaria_owner or "").strip() for inc in active if (inc.avaria_owner or "").strip()})
     if not owners:
         return None
     if len(owners) == 1:

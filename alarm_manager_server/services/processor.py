@@ -16,7 +16,10 @@ from alarm_manager_server.services.grouping import (
     merge_groupings,
 )
 from alarm_manager_server.services.macros import MacroResolver, parse_macro
-from alarm_manager_server.services.owner_display import build_group_display_title
+from alarm_manager_server.services.owner_display import (
+    _incident_owner_base_name,
+    build_group_display_title,
+)
 from alarm_manager_server.saymon.client import SaymonClient
 from alarm_manager_server.saymon.object_store import ObjectStore
 
@@ -153,13 +156,14 @@ class AlarmProcessor:
     async def _prefetch_display_names(self, incidents: list[Incident]) -> None:
         object_ids: set[str] = set()
         for inc in incidents:
-            if inc.is_synthetic and inc.entity_id:
-                object_ids.add(inc.entity_id)
+            if inc.is_synthetic:
+                if inc.entity_id:
+                    object_ids.add(inc.entity_id)
                 continue
+            if inc.entity_id:
+                object_ids.add(inc.entity_id)
             if inc.owner and len(inc.owner.parent_id) == 1 and inc.owner.parent_id[0]:
                 object_ids.add(inc.owner.parent_id[0])
-            if inc.entity_id and (not inc.owner or not inc.owner.name.strip()):
-                object_ids.add(inc.entity_id)
         await self.store.prefetch_object_names(object_ids)
 
     async def _to_processed_incident(
@@ -181,6 +185,7 @@ class AlarmProcessor:
         )
         display_title = f"{inc.title} ({parent_title})" if show_suffix else inc.title
         owner_display_title = await build_group_display_title(inc, self.store)
+        object_display_name = await _incident_owner_base_name(inc, self.store)
 
         return ProcessedIncident(
             **inc.model_dump(),
@@ -190,6 +195,7 @@ class AlarmProcessor:
             child_ids=child_ids,
             display_title=display_title,
             owner_display_title=owner_display_title,
+            object_display_name=object_display_name,
             status_label=self.status_label_for(inc.status, state_labels)
             if not inc.is_synthetic
             else "",

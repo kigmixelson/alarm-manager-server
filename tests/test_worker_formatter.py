@@ -21,12 +21,14 @@ def _inc(
     status_label: str = "critical",
     text: str = "disk full",
     avaria_owner: str | None = None,
+    object_display_name: str = "",
 ) -> ProcessedIncident:
     return ProcessedIncident(
         id=id,
         title=title,
         display_title=title,
         owner_display_title=owner_display_title or title,
+        object_display_name=object_display_name,
         severity=1,
         status=status,
         status_label=status_label,
@@ -132,6 +134,59 @@ def test_responsible_line_and_row_column():
     groups = build_groups([inc], GroupingResult(), cfg, show_responsible=True)
     assert groups[0].responsible_line == "ответственный: Иванов И.И."
     assert groups[0].rows[0].endswith("\tИванов И.И.")
+
+
+def test_responsible_omitted_when_all_members_cleared():
+    cfg = Settings(saymon_base_url="http://saymon", incident_link_template="{saymon_base_url}/i/{id}")
+    c1 = _inc("c1", status=3, status_label="cleared", avaria_owner="Иванов И.И.")
+    c2 = _inc("c2", status=3, status_label="cleared", avaria_owner="Петров П.П.")
+    grouping = GroupingResult(
+        children_of={"__synth__e1": ["c1", "c2"]},
+        parent_of={"c1": "__synth__e1", "c2": "__synth__e1"},
+    )
+    synth = _inc("__synth__e1", title="Router-A", is_synthetic=True)
+    groups = build_groups([synth, c1, c2], grouping, cfg, show_responsible=True)
+    assert groups[0].responsible_line is None
+
+
+def test_responsible_uses_only_active_members():
+    cfg = Settings(saymon_base_url="http://saymon", incident_link_template="{saymon_base_url}/i/{id}")
+    active = _inc("a1", status=2, status_label="warning", avaria_owner="Иванов И.И.")
+    cleared = _inc(
+        "c1",
+        status=3,
+        status_label="cleared",
+        avaria_owner="Петров П.П.",
+        resolved_at="2025-01-01T12:00:00+00:00",
+    )
+    grouping = GroupingResult(children_of={"a1": ["c1"]}, parent_of={"c1": "a1"})
+    groups = build_groups([active, cleared], grouping, cfg, show_responsible=True)
+    assert groups[0].responsible_line == "ответственный: Иванов И.И."
+    rows = [r.split("\t") for r in groups[0].rows]
+    active_row = next(row for row in rows if row[-1] == "Иванов И.И.")
+    cleared_row = next(row for row in rows if row[0] == "cleared")
+    assert active_row[-1] == "Иванов И.И."
+    assert cleared_row[-1] == ""
+
+
+def test_object_display_name_used_in_compact_row():
+    cfg = Settings(saymon_base_url="http://saymon", incident_link_template="{saymon_base_url}/i/{id}")
+    inc = _inc(
+        "c1",
+        title="67cb1f06120ab073c5adb78c",
+        object_display_name="PSU.#1@R2.saymon",
+        status=3,
+        status_label="cleared",
+    )
+    grouping = GroupingResult(
+        children_of={"__synth__e1": ["c1"]},
+        parent_of={"c1": "__synth__e1"},
+    )
+    synth = _inc("__synth__e1", title="Router-A", is_synthetic=True)
+    groups = build_groups([synth, inc], grouping, cfg)
+    cols = groups[0].rows[0].split("\t")
+    assert cols[1] == "PSU.#1@R2.saymon"
+    assert "67cb1f06120ab073c5adb78c" not in groups[0].rows[0]
 
 
 def test_responsible_omitted_when_not_found():
