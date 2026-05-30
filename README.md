@@ -13,13 +13,16 @@
 ## Установка
 
 ```bash
-cd ../alarm-manager-server
-python -m venv .venv
+# все команды — из корня репозитория alarm-manager-server
+# на macOS часто доступен только python3, не python
+python3 -m venv .venv
 source .venv/bin/activate
-pip install -e ".[dev]"
+python3 -m pip install -e ".[dev]"
 cp .env.example .env
 # укажите SAYMON_BASE_URL, SAYMON_LOGIN, SAYMON_PASSWORD
 ```
+
+Если вы в соседнем каталоге `alarm-manager`, сначала выполните `cd ../alarm-manager-server`.
 
 Перед запросами к SAYMON клиент выполняет `POST /node/api/users/session`, сохраняет cookies `sid` и `csrf`, затем (опционально) открывает `SAYMON_AUTH_REDIRECT_URL`. Все API-запросы идут с `Cookie` и заголовком `x-csrf-token`, как в curl `-b` / `-H 'x-csrf-token: ...'`.
 
@@ -28,7 +31,9 @@ cp .env.example .env
 ```bash
 alarm-manager-server
 # или
-uvicorn alarm_manager_server.api.app:app --reload --port 8000
+python3 -m alarm_manager_server
+# или
+python3 -m uvicorn alarm_manager_server.api.app:app --reload --port 8000
 ```
 
 ### Фоновый worker (группировка в консоль)
@@ -43,7 +48,7 @@ alarm-manager-worker --once
 alarm-manager-worker
 
 # или
-python -m alarm_manager_server.worker --server-url http://127.0.0.1:8000 --interval 30
+python3 -m alarm_manager_server.worker --server-url http://127.0.0.1:8000 --interval 30
 ```
 
 Шаблон ссылки: `INCIDENT_LINK_TEMPLATE` (плейсхолдеры `{id}`, `{saymon_base_url}`).
@@ -91,5 +96,5 @@ alarm_manager_server/
 ## Тесты
 
 ```bash
-pytest
+python3 -m pytest
 ```
