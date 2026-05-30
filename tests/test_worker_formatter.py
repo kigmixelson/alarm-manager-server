@@ -4,7 +4,6 @@ from alarm_manager_server.worker.formatter import (
     IncidentGroup,
     build_groups,
     format_groups,
-    incident_link,
 )
 
 
@@ -12,71 +11,90 @@ def _inc(
     id: str,
     *,
     title: str = "Host",
-    display_title: str = "",
     owner_display_title: str = "",
     is_synthetic: bool = False,
+    started_at: str = "2025-01-01T10:00:00+00:00",
+    resolved_at: str | None = None,
+    status_label: str = "critical",
+    text: str = "disk full",
 ) -> ProcessedIncident:
     return ProcessedIncident(
         id=id,
         title=title,
-        display_title=display_title or title,
+        display_title=title,
         owner_display_title=owner_display_title or title,
         severity=1,
-        status=1,
-        started_at="2025-01-01T00:00:00+00:00",
+        status=3,
+        status_label=status_label,
+        started_at=started_at,
+        resolved_at=resolved_at,
+        text=text,
         is_synthetic=is_synthetic,
     )
 
 
-def test_singleton_group_uses_owner_display_title():
+def test_singleton_group_header_and_tab_row():
     cfg = Settings(saymon_base_url="http://saymon", incident_link_template="{saymon_base_url}/i/{id}")
-    incidents = [_inc("a", title="Lonely", owner_display_title="Lonely (Router-1)")]
-    grouping = GroupingResult()
-    groups = build_groups(incidents, grouping, cfg)
+    incidents = [
+        _inc(
+            "a",
+            owner_display_title="Lonely (Router-1)",
+            started_at="2025-01-02T12:00:00+00:00",
+            resolved_at="2025-01-02T13:00:00+00:00",
+        )
+    ]
+    groups = build_groups(incidents, GroupingResult(), cfg)
     assert len(groups) == 1
-    assert groups[0].name == "Lonely (Router-1)"
-    assert groups[0].links == ["http://saymon/i/a"]
+    assert groups[0].title == "Lonely (Router-1)"
+    assert "аварий: 1" in groups[0].stats_line
+    assert "02.01.2025" in groups[0].stats_line
+    row = groups[0].rows[0].split("\t")
+    assert row[0] == "critical"
+    assert row[1] == "02.01.2025 12:00"
+    assert row[2] == "02.01.2025 13:00"
+    assert row[3] == "disk full"
+    assert row[4] == "a"
 
 
-def test_merged_owner_group_lists_parent_and_children():
+def test_open_incident_has_padded_empty_closed_column():
     cfg = Settings(saymon_base_url="http://saymon", incident_link_template="{saymon_base_url}/i/{id}")
-    parent = _inc("p", title="Parent host")
-    child = _inc("c", title="Child")
-    grouping = GroupingResult(children_of={"p": ["c"]}, parent_of={"c": "p"})
-    groups = build_groups([parent, child], grouping, cfg)
+    open_inc = _inc("open", started_at="2025-01-01T10:00:00+00:00", resolved_at=None)
+    closed_inc = _inc(
+        "closed",
+        started_at="2025-01-01T11:00:00+00:00",
+        resolved_at="2025-01-01T12:00:00+00:00",
+    )
+    grouping = GroupingResult(children_of={"open": ["closed"]}, parent_of={"closed": "open"})
+    groups = build_groups([open_inc, closed_inc], grouping, cfg)
     assert len(groups) == 1
-    assert groups[0].name == "Parent host"
-    assert groups[0].links == ["http://saymon/i/p", "http://saymon/i/c"]
+    assert "аварий: 2" in groups[0].stats_line
+    rows = [r.split("\t") for r in groups[0].rows]
+    assert len(rows[0][2]) == len(rows[1][2])
+    assert rows[0][2].strip() == ""
 
 
-def test_synthetic_group_name_and_child_links_only():
+def test_synthetic_group_lists_children_only():
     cfg = Settings(saymon_base_url="http://saymon", incident_link_template="{saymon_base_url}/i/{id}")
-    synth = _inc("__synth__e1", title="Router-A", is_synthetic=True)
-    c1 = _inc("c1", title="A1")
-    c2 = _inc("c2", title="A2")
+    synth = _inc("__synth__e1", title="Router-A", is_synthetic=True, status_label="")
+    c1 = _inc("c1", title="A1", started_at="2025-01-01T08:00:00+00:00")
+    c2 = _inc("c2", title="A2", started_at="2025-01-03T08:00:00+00:00")
     grouping = GroupingResult(
         children_of={"__synth__e1": ["c1", "c2"]},
         parent_of={"c1": "__synth__e1", "c2": "__synth__e1"},
     )
     groups = build_groups([synth, c1, c2], grouping, cfg)
-    assert len(groups) == 1
-    assert groups[0].name == "Router-A"
-    assert groups[0].links == ["http://saymon/i/c1", "http://saymon/i/c2"]
+    assert groups[0].title == "Router-A"
+    assert "аварий: 2" in groups[0].stats_line
+    assert len(groups[0].rows) == 2
+    assert all("c1" in r or "c2" in r for r in groups[0].rows)
 
 
 def test_format_groups_separated_by_blank_line():
     text = format_groups(
         [
-            IncidentGroup("G1", ["http://x/1"]),
-            IncidentGroup("G2", ["http://x/2", "http://x/3"]),
+            IncidentGroup("G1", "первая: — | последняя: — | аварий: 1", ["critical\ta\t\tb\tid1"]),
+            IncidentGroup("G2", "стат", ["row1", "row2"]),
         ]
     )
-    assert text == "G1\nhttp://x/1\n\nG2\nhttp://x/2\nhttp://x/3"
-
-
-def test_incident_link_template():
-    cfg = Settings(
-        saymon_base_url="http://host/",
-        incident_link_template="{saymon_base_url}/apps?id={id}",
-    )
-    assert incident_link("42", cfg) == "http://host/apps?id=42"
+    assert text.startswith("G1\nпервая:")
+    assert "\n\nG2\n" in text

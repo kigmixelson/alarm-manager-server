@@ -32,6 +32,27 @@ class AlarmProcessor:
         self.client = client or SaymonClient.from_settings(self.cfg)
         self.store = store or ObjectStore(self.client)
         self.macro_resolver = MacroResolver(self.store, depth=self.cfg.macro_depth)
+        self._state_labels: dict[str, str] | None = None
+
+    async def get_state_labels(self) -> dict[str, str]:
+        if self._state_labels is not None:
+            return self._state_labels
+        labels: dict[str, str] = {}
+        try:
+            levels = await self.client.get_incident_levels()
+            for level in levels:
+                level_id = level.get("id")
+                name = level.get("name")
+                if level_id is not None and name:
+                    labels[str(level_id)] = str(name)
+        except Exception:
+            pass
+        self._state_labels = labels
+        return labels
+
+    def status_label_for(self, status: int | str, labels: dict[str, str]) -> str:
+        key = str(status)
+        return labels.get(key, key)
 
     async def fetch_incidents(self) -> list[Incident]:
         active_raw = await self.client.get_incidents(limit=self.cfg.fetch_limit)
@@ -103,6 +124,7 @@ class AlarmProcessor:
         )
 
         await self._prefetch_display_names(all_incidents)
+        state_labels = await self.get_state_labels()
 
         result: list[ProcessedIncident] = []
         for inc in all_incidents:
@@ -111,6 +133,7 @@ class AlarmProcessor:
                     inc,
                     grouping,
                     all_responsible.get(inc.id) if not inc.is_synthetic else None,
+                    state_labels,
                 )
             )
 
@@ -141,6 +164,7 @@ class AlarmProcessor:
         inc: Incident,
         grouping: GroupingResult,
         avaria_owner: str | None,
+        state_labels: dict[str, str],
     ) -> ProcessedIncident:
         parent_title = grouping.parent_title_of.get(inc.id)
         parent_id = grouping.parent_of.get(inc.id)
@@ -163,6 +187,9 @@ class AlarmProcessor:
             child_ids=child_ids,
             display_title=display_title,
             owner_display_title=owner_display_title,
+            status_label=self.status_label_for(inc.status, state_labels)
+            if not inc.is_synthetic
+            else "",
         )
 
     def visible_rows(

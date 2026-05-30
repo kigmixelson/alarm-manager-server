@@ -86,6 +86,7 @@ async def process_incidents(
         responsible = {}
 
     await processor._prefetch_display_names(all_incidents)
+    state_labels = await processor.get_state_labels()
 
     processed: list[ProcessedIncident] = []
     for inc in all_incidents:
@@ -94,6 +95,7 @@ async def process_incidents(
                 inc,
                 grouping,
                 responsible.get(inc.id) if not inc.is_synthetic else None,
+                state_labels,
             )
         )
 

@@ -69,6 +69,10 @@ class SaymonClient:
         data = await self._get_json("/classes")
         return coerce_json_list(data, label="GET /classes")
 
+    async def get_incident_levels(self) -> list[dict[str, Any]]:
+        data = await self._get_json("/incident-levels")
+        return coerce_json_list(data, label="GET /incident-levels")
+
     async def get_object(self, obj_id: str) -> dict[str, Any] | None:
         try:
             return await self._get_json(f"/objects/{obj_id}")
