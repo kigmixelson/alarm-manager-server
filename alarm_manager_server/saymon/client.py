@@ -55,15 +55,58 @@ class SaymonClient:
             self._client = None
         self._authenticated = False
 
-    async def get_incidents(self, limit: int = 200) -> list[dict[str, Any]]:
-        data = await self._get_json(f"/incidents?limit={limit}&skip=0&owner=true")
-        return coerce_json_list(data, label="GET /incidents")
-
-    async def get_incident_history(self, limit: int = 3000) -> list[dict[str, Any]]:
-        data = await self._get_json(
-            f"/incident-history?inverse=true&limit={limit}&skip=0&owner=false"
+    async def get_incidents(self, limit: int = 1000, *, page_size: int | None = None) -> list[dict[str, Any]]:
+        return await self._fetch_paginated(
+            "/incidents",
+            max_items=limit,
+            query={"owner": "true"},
+            page_size=page_size,
         )
-        return coerce_json_list(data, label="GET /incident-history")
+
+    async def get_incident_history(
+        self,
+        limit: int = 5000,
+        *,
+        page_size: int | None = None,
+    ) -> list[dict[str, Any]]:
+        return await self._fetch_paginated(
+            "/incident-history",
+            max_items=limit,
+            query={"inverse": "true", "owner": "false"},
+            page_size=page_size,
+        )
+
+    async def _fetch_paginated(
+        self,
+        path: str,
+        *,
+        max_items: int,
+        query: dict[str, str],
+        page_size: int | None = None,
+    ) -> list[dict[str, Any]]:
+        if max_items <= 0:
+            return []
+
+        page_size = page_size or min(500, max_items)
+        page_size = max(1, min(page_size, max_items))
+        label = f"GET {path}"
+        results: list[dict[str, Any]] = []
+        skip = 0
+
+        while len(results) < max_items:
+            batch_limit = min(page_size, max_items - len(results))
+            params = {**query, "limit": str(batch_limit), "skip": str(skip)}
+            qs = "&".join(f"{k}={v}" for k, v in params.items())
+            data = await self._get_json(f"{path}?{qs}")
+            batch = coerce_json_list(data, label=label)
+            if not batch:
+                break
+            results.extend(batch)
+            if len(batch) < batch_limit:
+                break
+            skip += len(batch)
+
+        return results
 
     async def get_classes(self) -> list[dict[str, Any]]:
         data = await self._get_json("/classes")

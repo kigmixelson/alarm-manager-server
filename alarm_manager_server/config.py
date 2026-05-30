@@ -20,8 +20,9 @@ class Settings(BaseSettings):
     ]
     macro_depth: int = 8
 
-    fetch_limit: int = 200
-    history_limit: int = 3000
+    fetch_limit: int = 1000
+    history_limit: int = 5000
+    fetch_page_size: int = 500
 
     server_url: str = "http://127.0.0.1:8000"
     worker_interval_sec: float = 60.0

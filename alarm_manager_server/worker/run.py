@@ -31,8 +31,12 @@ async def run_once(
         show_responsible=show_responsible,
     )
     text = format_groups(groups)
+    incident_rows = sum(len(group.rows) for group in groups)
     stamp = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
-    print(f"--- {stamp} — {len(groups)} group(s) ---", flush=True)
+    print(
+        f"--- {stamp} — {len(groups)} group(s), {incident_rows} incident row(s) ---",
+        flush=True,
+    )
     if text:
         print(text, flush=True)
     else:

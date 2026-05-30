@@ -8,6 +8,7 @@ from alarm_manager_server.models.incident import (
     Incident,
     ProcessedIncident,
     SyntheticGroupSeed,
+    get_opened_at_ms,
     incident_object_id,
 )
 from alarm_manager_server.services.grouping import (
@@ -23,6 +24,19 @@ from alarm_manager_server.services.owner_display import (
 )
 from alarm_manager_server.saymon.client import SaymonClient
 from alarm_manager_server.saymon.object_store import ObjectStore
+
+
+def merge_active_and_history_incidents(
+    active: list[Incident],
+    history: list[Incident],
+) -> list[Incident]:
+    """Deduplicate by incident id; active records win over history for the same id."""
+    by_id: dict[str, Incident] = {}
+    for inc in history:
+        by_id[inc.id] = inc
+    for inc in active:
+        by_id[inc.id] = inc
+    return sorted(by_id.values(), key=get_opened_at_ms, reverse=True)
 
 
 class AlarmProcessor:
@@ -59,10 +73,16 @@ class AlarmProcessor:
         return labels.get(key, key)
 
     async def fetch_incidents(self) -> list[Incident]:
-        active_raw = await self.client.get_incidents(limit=self.cfg.fetch_limit)
-        history_raw = await self.client.get_incident_history(limit=self.cfg.history_limit)
+        active_raw = await self.client.get_incidents(
+            limit=self.cfg.fetch_limit,
+            page_size=self.cfg.fetch_page_size,
+        )
+        history_raw = await self.client.get_incident_history(
+            limit=self.cfg.history_limit,
+            page_size=self.cfg.fetch_page_size,
+        )
 
-        incidents: list[Incident] = []
+        active: list[Incident] = []
         for raw in active_raw:
             if not isinstance(raw, dict) or raw.get("id") is None:
                 continue
@@ -71,8 +91,9 @@ class AlarmProcessor:
                 incident_object_id(inc),
                 raw.get("owner") if isinstance(raw.get("owner"), dict) else None,
             )
-            incidents.append(inc)
+            active.append(inc)
 
+        history: list[Incident] = []
         for raw in history_raw:
             if not isinstance(raw, dict) or raw.get("id") is None:
                 continue
@@ -81,9 +102,9 @@ class AlarmProcessor:
                 incident_object_id(inc),
                 raw.get("owner") if isinstance(raw.get("owner"), dict) else None,
             )
-            incidents.append(inc)
+            history.append(inc)
 
-        return incidents
+        return merge_active_and_history_incidents(active, history)
 
     async def compute_grouping(self, incidents: list[Incident]) -> GroupingResult:
         class_ids = await self.client.resolve_class_ids_by_names(self.cfg.group_by_class_names)

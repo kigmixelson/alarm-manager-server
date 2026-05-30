@@ -116,6 +116,36 @@ def is_all_cleared_group(members: list[ProcessedIncident]) -> bool:
     return bool(members) and all(is_cleared_incident(inc) for inc in members)
 
 
+def _make_incident_group(
+    head: ProcessedIncident,
+    members: list[ProcessedIncident],
+    *,
+    show_responsible: bool,
+) -> IncidentGroup | None:
+    if not members:
+        return None
+
+    members = _sort_members(members)
+    closed_values = [_format_display_time(inc.resolved_at) for inc in members]
+    closed_width = max((len(v) for v in closed_values), default=0)
+    show_row_responsible = show_responsible and len(members) == 1
+    rows = [
+        _format_incident_row(
+            member,
+            closed_width=closed_width,
+            show_responsible=show_responsible,
+            show_row_responsible=show_row_responsible,
+        )
+        for member in members
+    ]
+    return IncidentGroup(
+        title=_group_title(head),
+        stats_line=_group_stats_line(members),
+        rows=rows,
+        responsible_line=_group_responsible_line(members, show_responsible=show_responsible),
+    )
+
+
 def build_groups(
     incidents: list[ProcessedIncident],
     grouping: GroupingResult,
@@ -126,9 +156,16 @@ def build_groups(
 ) -> list[IncidentGroup]:
     """Top-level rows only; children are folded into their parent group."""
     del cfg  # reserved for future output options
-    order = [inc.id for inc in incidents]
+    order: list[str] = []
+    seen_order: set[str] = set()
+    for inc in incidents:
+        if inc.id not in seen_order:
+            seen_order.add(inc.id)
+            order.append(inc.id)
+
     by_id = {inc.id: inc for inc in incidents}
     groups: list[IncidentGroup] = []
+    shown_ids: set[str] = set()
 
     for inc_id in order:
         inc = by_id.get(inc_id)
@@ -148,30 +185,25 @@ def build_groups(
         if active_only and is_all_cleared_group(members):
             continue
 
-        members = _sort_members(members)
+        group = _make_incident_group(inc, members, show_responsible=show_responsible)
+        if group is None:
+            continue
+        for member in members:
+            shown_ids.add(member.id)
+        groups.append(group)
 
-        closed_values = [_format_display_time(inc.resolved_at) for inc in members]
-        closed_width = max((len(v) for v in closed_values), default=0)
-
-        show_row_responsible = show_responsible and len(members) == 1
-        rows = [
-            _format_incident_row(
-                member,
-                closed_width=closed_width,
-                show_responsible=show_responsible,
-                show_row_responsible=show_row_responsible,
-            )
-            for member in members
-        ]
-        responsible_line = _group_responsible_line(members, show_responsible=show_responsible)
-        groups.append(
-            IncidentGroup(
-                title=_group_title(inc),
-                stats_line=_group_stats_line(members),
-                rows=rows,
-                responsible_line=responsible_line,
-            )
-        )
+    for inc_id in order:
+        inc = by_id.get(inc_id)
+        if inc is None or inc.is_synthetic or inc.id in shown_ids:
+            continue
+        members = [inc]
+        if active_only and is_all_cleared_group(members):
+            continue
+        group = _make_incident_group(inc, members, show_responsible=show_responsible)
+        if group is None:
+            continue
+        shown_ids.add(inc.id)
+        groups.append(group)
 
     return groups
 

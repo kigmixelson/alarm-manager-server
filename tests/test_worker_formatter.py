@@ -215,6 +215,20 @@ def test_responsible_omitted_when_not_found():
     assert groups[0].rows[0].endswith("\t")
 
 
+def test_build_groups_shows_orphan_child_missing_from_parent_member_list():
+    cfg = Settings(saymon_base_url="http://saymon", incident_link_template="{saymon_base_url}/i/{id}")
+    parent = _inc("parent", status=2, status_label="warning", owner_display_title="Parent")
+    orphan = _inc("orphan", status=2, status_label="critical", owner_display_title="Orphan")
+    grouping = GroupingResult(
+        children_of={"parent": []},
+        parent_of={"orphan": "parent"},
+    )
+    groups = build_groups([parent, orphan], grouping, cfg)
+    assert sum(len(g.rows) for g in groups) == 2
+    assert groups[0].title == "Parent"
+    assert groups[1].title == "Orphan"
+
+
 def test_format_groups_separated_by_blank_line():
     text = format_groups(
         [

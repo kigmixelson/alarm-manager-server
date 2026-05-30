@@ -67,6 +67,8 @@ python3 -m alarm_manager_server.worker --server-url http://127.0.0.1:8000 --inte
 
 Шаблон ссылки: `INCIDENT_LINK_TEMPLATE` (плейсхолдеры `{id}`, `{saymon_base_url}`).
 
+Если в web-интерфейсе аварий больше, чем в worker, увеличьте в `.env` лимиты `FETCH_LIMIT` / `HISTORY_LIMIT` (загрузка идёт постранично). Строка заголовка worker показывает число групп и строк аварий — сверяйте с UI.
+
 ## API
 
 | Метод | Путь | Описание |
