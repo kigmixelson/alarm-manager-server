@@ -110,6 +110,7 @@ class ProcessedIncident(Incident):
     parent_id: str | None = None
     child_ids: list[str] = Field(default_factory=list)
     display_title: str = ""
+    owner_display_title: str = ""
 
 
 def _parse_owner(owner_data: Any) -> IncidentOwner | None:

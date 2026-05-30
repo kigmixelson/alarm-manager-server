@@ -13,12 +13,14 @@ def _inc(
     *,
     title: str = "Host",
     display_title: str = "",
+    owner_display_title: str = "",
     is_synthetic: bool = False,
 ) -> ProcessedIncident:
     return ProcessedIncident(
         id=id,
         title=title,
         display_title=display_title or title,
+        owner_display_title=owner_display_title or title,
         severity=1,
         status=1,
         started_at="2025-01-01T00:00:00+00:00",
@@ -26,13 +28,13 @@ def _inc(
     )
 
 
-def test_singleton_group():
+def test_singleton_group_uses_owner_display_title():
     cfg = Settings(saymon_base_url="http://saymon", incident_link_template="{saymon_base_url}/i/{id}")
-    incidents = [_inc("a", title="Lonely")]
+    incidents = [_inc("a", title="Lonely", owner_display_title="Lonely (Router-1)")]
     grouping = GroupingResult()
     groups = build_groups(incidents, grouping, cfg)
     assert len(groups) == 1
-    assert groups[0].name == "Lonely"
+    assert groups[0].name == "Lonely (Router-1)"
     assert groups[0].links == ["http://saymon/i/a"]
 
 

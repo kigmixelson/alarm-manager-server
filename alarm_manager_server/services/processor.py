@@ -11,6 +11,7 @@ from alarm_manager_server.services.grouping import (
     merge_groupings,
 )
 from alarm_manager_server.services.macros import MacroResolver, parse_macro
+from alarm_manager_server.services.owner_display import build_owner_display_title
 from alarm_manager_server.saymon.client import SaymonClient
 from alarm_manager_server.saymon.object_store import ObjectStore
 
@@ -97,30 +98,47 @@ class AlarmProcessor:
 
         result: list[ProcessedIncident] = []
         for inc in all_incidents:
-            parent_title = grouping.parent_title_of.get(inc.id)
-            parent_id = grouping.parent_of.get(inc.id)
-            child_ids = grouping.children_of.get(inc.id, [])
-            has_parent_incident = inc.id in grouping.parent_of
-            show_suffix = (
-                not inc.is_synthetic
-                and not has_parent_incident
-                and parent_title
-                and parent_title != inc.title
-            )
-            display_title = f"{inc.title} ({parent_title})" if show_suffix else inc.title
-
             result.append(
-                ProcessedIncident(
-                    **inc.model_dump(),
-                    avaria_owner=all_responsible.get(inc.id) if not inc.is_synthetic else None,
-                    parent_title=parent_title,
-                    parent_id=parent_id,
-                    child_ids=child_ids,
-                    display_title=display_title,
+                await self._to_processed_incident(
+                    inc,
+                    grouping,
+                    all_responsible.get(inc.id) if not inc.is_synthetic else None,
                 )
             )
 
         return result
+
+    async def _to_processed_incident(
+        self,
+        inc: Incident,
+        grouping: GroupingResult,
+        avaria_owner: str | None,
+    ) -> ProcessedIncident:
+        parent_title = grouping.parent_title_of.get(inc.id)
+        parent_id = grouping.parent_of.get(inc.id)
+        child_ids = grouping.children_of.get(inc.id, [])
+        has_parent_incident = inc.id in grouping.parent_of
+        show_suffix = (
+            not inc.is_synthetic
+            and not has_parent_incident
+            and parent_title
+            and parent_title != inc.title
+        )
+        display_title = f"{inc.title} ({parent_title})" if show_suffix else inc.title
+        if inc.is_synthetic:
+            owner_display_title = inc.title
+        else:
+            owner_display_title = await build_owner_display_title(inc, self.store)
+
+        return ProcessedIncident(
+            **inc.model_dump(),
+            avaria_owner=avaria_owner,
+            parent_title=parent_title,
+            parent_id=parent_id,
+            child_ids=child_ids,
+            display_title=display_title,
+            owner_display_title=owner_display_title,
+        )
 
     def visible_rows(
         self,

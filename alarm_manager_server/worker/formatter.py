@@ -14,6 +14,14 @@ class IncidentGroup:
     links: list[str]
 
 
+def _group_title(inc: ProcessedIncident) -> str:
+    if inc.is_synthetic:
+        return inc.title
+    if inc.owner_display_title:
+        return inc.owner_display_title
+    return inc.title
+
+
 def incident_link(incident_id: str, cfg: Settings) -> str:
     return cfg.incident_link_template.format(
         id=incident_id,
@@ -39,7 +47,7 @@ def build_groups(
         child_ids = grouping.children_of.get(inc.id, [])
         if inc.is_synthetic and not child_ids:
             continue
-        name = inc.display_title or inc.title
+        name = _group_title(inc)
 
         if child_ids:
             member_ids = list(child_ids) if inc.is_synthetic else [inc.id, *child_ids]

@@ -86,23 +86,11 @@ async def process_incidents(
 
     processed: list[ProcessedIncident] = []
     for inc in all_incidents:
-        parent_title = grouping.parent_title_of.get(inc.id)
-        parent_id = grouping.parent_of.get(inc.id)
-        child_ids = grouping.children_of.get(inc.id, [])
-        has_parent = inc.id in grouping.parent_of
-        show_suffix = (
-            not inc.is_synthetic and not has_parent and parent_title and parent_title != inc.title
-        )
-        display_title = f"{inc.title} ({parent_title})" if show_suffix else inc.title
-
         processed.append(
-            ProcessedIncident(
-                **inc.model_dump(),
-                avaria_owner=responsible.get(inc.id) if not inc.is_synthetic else None,
-                parent_title=parent_title,
-                parent_id=parent_id,
-                child_ids=child_ids,
-                display_title=display_title,
+            await processor._to_processed_incident(
+                inc,
+                grouping,
+                responsible.get(inc.id) if not inc.is_synthetic else None,
             )
         )
 
