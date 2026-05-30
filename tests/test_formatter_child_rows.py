@@ -28,6 +28,7 @@ def test_row_uses_object_display_name():
         ),
         closed_width=16,
         show_responsible=False,
+        show_row_responsible=False,
     )
     cols = row.split("\t")
     assert cols[1] == "PSU.#1"
@@ -38,6 +39,7 @@ def test_row_uses_object_name_and_omits_incident_id():
         _inc("child-id", title="PSU.#1"),
         closed_width=16,
         show_responsible=False,
+        show_row_responsible=False,
     )
     cols = row.split("\t")
     assert cols[0] == "warning"
@@ -63,6 +65,7 @@ def test_singleton_row_shows_dash_not_object_id_stub():
         ),
         closed_width=0,
         show_responsible=False,
+        show_row_responsible=False,
     )
     cols = row.split("\t")
     assert cols[1] == "—"
@@ -75,6 +78,7 @@ def test_singleton_row_uses_object_column_not_incident_id():
         _inc("parent-id"),
         closed_width=0,
         show_responsible=False,
+        show_row_responsible=False,
     )
     cols = row.split("\t")
     assert cols[1] == "svc-1"

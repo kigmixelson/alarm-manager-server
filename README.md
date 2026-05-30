@@ -53,7 +53,7 @@ alarm-manager-worker --once
 # только группы с не-Cleared авариями
 alarm-manager-worker --once --active
 
-# с ответственными (строка в группе + колонка в строке аварии, если найдено)
+# с ответственными (строка в группе; для одиночной аварии — ещё и колонка в строке)
 alarm-manager-worker --once --responsible
 
 Убедитесь, что `MACROS` в `.env` совпадает с настройками в web-интерфейсе (localStorage `ps-macros`).

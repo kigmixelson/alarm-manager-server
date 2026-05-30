@@ -60,6 +60,7 @@ def _format_incident_row(
     *,
     closed_width: int,
     show_responsible: bool,
+    show_row_responsible: bool,
 ) -> str:
     state = inc.status_label or str(inc.status)
     opened = _format_display_time(inc.started_at)
@@ -68,7 +69,7 @@ def _format_incident_row(
     else:
         closed = " " * closed_width
     text = _incident_text(inc)
-    responsible = (inc.avaria_owner or "").strip() if show_responsible else ""
+    responsible = (inc.avaria_owner or "").strip() if show_row_responsible else ""
 
     parts = [state, _object_name(inc), opened, closed, text]
     if show_responsible:
@@ -152,11 +153,13 @@ def build_groups(
         closed_values = [_format_display_time(inc.resolved_at) for inc in members]
         closed_width = max((len(v) for v in closed_values), default=0)
 
+        show_row_responsible = show_responsible and len(members) == 1
         rows = [
             _format_incident_row(
                 member,
                 closed_width=closed_width,
                 show_responsible=show_responsible,
+                show_row_responsible=show_row_responsible,
             )
             for member in members
         ]

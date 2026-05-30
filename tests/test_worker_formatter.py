@@ -163,6 +163,10 @@ def test_responsible_includes_cleared_members():
     synth = _inc("__synth__e1", title="Router-A", is_synthetic=True)
     groups = build_groups([synth, c1, c2], grouping, cfg, show_responsible=True)
     assert groups[0].responsible_line == "ответственные: Иванов И.И., Петров П.П."
+    for row in groups[0].rows:
+        assert row.split("\t")[-1] == ""
+        assert "Иванов" not in row
+        assert "Петров" not in row
 
 
 def test_responsible_on_active_and_cleared_rows():
@@ -178,9 +182,8 @@ def test_responsible_on_active_and_cleared_rows():
     grouping = GroupingResult(children_of={"a1": ["c1"]}, parent_of={"c1": "a1"})
     groups = build_groups([active, cleared], grouping, cfg, show_responsible=True)
     assert groups[0].responsible_line == "ответственные: Иванов И.И., Петров П.П."
-    rows = [r.split("\t") for r in groups[0].rows]
-    assert any(row[-1] == "Иванов И.И." for row in rows)
-    assert any(row[-1] == "Петров П.П." for row in rows)
+    for row in groups[0].rows:
+        assert row.split("\t")[-1] == ""
 
 
 def test_object_display_name_used_in_compact_row():
