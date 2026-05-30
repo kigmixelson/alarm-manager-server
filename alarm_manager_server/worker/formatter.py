@@ -16,6 +16,7 @@ class IncidentGroup:
     title: str
     stats_line: str
     rows: list[str]
+    responsible_line: str | None = None
 
 
 def _group_title(inc: ProcessedIncident) -> str:
@@ -39,7 +40,12 @@ def _incident_text(inc: ProcessedIncident) -> str:
     return " ".join(text.split())
 
 
-def _format_incident_row(inc: ProcessedIncident, *, closed_width: int) -> str:
+def _format_incident_row(
+    inc: ProcessedIncident,
+    *,
+    closed_width: int,
+    show_responsible: bool,
+) -> str:
     state = inc.status_label or str(inc.status)
     opened = _format_display_time(inc.started_at)
     if inc.resolved_at:
@@ -47,7 +53,27 @@ def _format_incident_row(inc: ProcessedIncident, *, closed_width: int) -> str:
     else:
         closed = " " * closed_width
     text = _incident_text(inc)
-    return "\t".join([state, opened, closed, text, inc.id])
+    parts = [state, opened, closed, text, inc.id]
+    if show_responsible:
+        owner = (inc.avaria_owner or "").strip()
+        if owner:
+            parts.append(owner)
+    return "\t".join(parts)
+
+
+def _group_responsible_line(
+    members: list[ProcessedIncident],
+    *,
+    show_responsible: bool,
+) -> str | None:
+    if not show_responsible:
+        return None
+    owners = sorted({(inc.avaria_owner or "").strip() for inc in members if (inc.avaria_owner or "").strip()})
+    if not owners:
+        return None
+    if len(owners) == 1:
+        return f"ответственный: {owners[0]}"
+    return f"ответственные: {', '.join(owners)}"
 
 
 def _group_stats_line(members: list[ProcessedIncident]) -> str:
@@ -80,6 +106,7 @@ def build_groups(
     cfg: Settings,
     *,
     active_only: bool = False,
+    show_responsible: bool = False,
 ) -> list[IncidentGroup]:
     """Top-level rows only; children are folded into their parent group."""
     del cfg  # reserved for future output options
@@ -110,12 +137,17 @@ def build_groups(
         closed_values = [_format_display_time(inc.resolved_at) for inc in members]
         closed_width = max((len(v) for v in closed_values), default=0)
 
-        rows = [_format_incident_row(inc, closed_width=closed_width) for inc in members]
+        rows = [
+            _format_incident_row(inc, closed_width=closed_width, show_responsible=show_responsible)
+            for inc in members
+        ]
+        responsible_line = _group_responsible_line(members, show_responsible=show_responsible)
         groups.append(
             IncidentGroup(
                 title=_group_title(inc),
                 stats_line=_group_stats_line(members),
                 rows=rows,
+                responsible_line=responsible_line,
             )
         )
 
@@ -125,6 +157,9 @@ def build_groups(
 def format_groups(groups: list[IncidentGroup]) -> str:
     blocks: list[str] = []
     for group in groups:
-        lines = [group.title, group.stats_line, *group.rows]
+        lines = [group.title, group.stats_line]
+        if group.responsible_line:
+            lines.append(group.responsible_line)
+        lines.extend(group.rows)
         blocks.append("\n".join(lines))
     return "\n\n".join(blocks)

@@ -20,9 +20,16 @@ async def run_once(
     *,
     resolve_macros: bool,
     active_only: bool,
+    show_responsible: bool,
 ) -> None:
     incidents, grouping = await client.process(resolve_macros=resolve_macros)
-    groups = build_groups(incidents, grouping, settings, active_only=active_only)
+    groups = build_groups(
+        incidents,
+        grouping,
+        settings,
+        active_only=active_only,
+        show_responsible=show_responsible,
+    )
     text = format_groups(groups)
     stamp = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
     print(f"--- {stamp} — {len(groups)} group(s) ---", flush=True)
@@ -38,10 +45,16 @@ async def run_loop(
     interval_sec: float,
     resolve_macros: bool,
     active_only: bool,
+    show_responsible: bool,
 ) -> None:
     while True:
         try:
-            await run_once(client, resolve_macros=resolve_macros, active_only=active_only)
+            await run_once(
+                client,
+                resolve_macros=resolve_macros,
+                active_only=active_only,
+                show_responsible=show_responsible,
+            )
         except Exception:
             logger.exception("processing failed")
         await asyncio.sleep(interval_sec)
@@ -78,6 +91,11 @@ def main(argv: list[str] | None = None) -> None:
         help="Hide groups where all incidents are Cleared",
     )
     parser.add_argument(
+        "--responsible",
+        action="store_true",
+        help="Print resolved responsible parties (enables macro resolution)",
+    )
+    parser.add_argument(
         "-v",
         "--verbose",
         action="store_true",
@@ -91,14 +109,22 @@ def main(argv: list[str] | None = None) -> None:
     )
 
     interval = 0.0 if args.once else args.interval
-    resolve_macros = not args.no_macros
+    if args.responsible and args.no_macros:
+        parser.error("--responsible cannot be used together with --no-macros")
+    resolve_macros = True if args.responsible else not args.no_macros
     active_only = args.active
+    show_responsible = args.responsible
     client = ProcessApiClient(args.server_url)
 
     if interval <= 0:
         try:
             asyncio.run(
-                run_once(client, resolve_macros=resolve_macros, active_only=active_only),
+                run_once(
+                    client,
+                    resolve_macros=resolve_macros,
+                    active_only=active_only,
+                    show_responsible=show_responsible,
+                ),
             )
         except KeyboardInterrupt:
             sys.exit(130)
@@ -115,6 +141,7 @@ def main(argv: list[str] | None = None) -> None:
                 interval_sec=interval,
                 resolve_macros=resolve_macros,
                 active_only=active_only,
+                show_responsible=show_responsible,
             ),
         )
     except KeyboardInterrupt:

@@ -53,6 +53,9 @@ alarm-manager-worker --once
 # только группы с не-Cleared авариями
 alarm-manager-worker --once --active
 
+# с ответственными (строка в группе + колонка в строке аварии, если найдено)
+alarm-manager-worker --once --responsible
+
 # цикл каждые 60 с (SERVER_URL / WORKER_INTERVAL_SEC в .env)
 alarm-manager-worker
 

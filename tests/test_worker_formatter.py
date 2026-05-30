@@ -20,6 +20,7 @@ def _inc(
     status: int | str = 2,
     status_label: str = "critical",
     text: str = "disk full",
+    avaria_owner: str | None = None,
 ) -> ProcessedIncident:
     return ProcessedIncident(
         id=id,
@@ -32,6 +33,7 @@ def _inc(
         started_at=started_at,
         resolved_at=resolved_at,
         text=text,
+        avaria_owner=avaria_owner,
         is_synthetic=is_synthetic,
     )
 
@@ -111,6 +113,22 @@ def test_is_cleared_by_status_label():
     assert is_cleared_incident(_inc("x", status=3, status_label=""))
     assert not is_cleared_incident(_inc("x", status=2, status_label="warning"))
     assert is_all_cleared_group([_inc("a", status=3, status_label="cleared")])
+
+
+def test_responsible_line_and_row_column():
+    cfg = Settings(saymon_base_url="http://saymon", incident_link_template="{saymon_base_url}/i/{id}")
+    inc = _inc("a", avaria_owner="Иванов И.И.")
+    groups = build_groups([inc], GroupingResult(), cfg, show_responsible=True)
+    assert groups[0].responsible_line == "ответственный: Иванов И.И."
+    assert groups[0].rows[0].endswith("\tИванов И.И.")
+
+
+def test_responsible_omitted_when_not_found():
+    cfg = Settings(saymon_base_url="http://saymon", incident_link_template="{saymon_base_url}/i/{id}")
+    inc = _inc("a", avaria_owner=None)
+    groups = build_groups([inc], GroupingResult(), cfg, show_responsible=True)
+    assert groups[0].responsible_line is None
+    assert groups[0].rows[0].count("\t") == 4
 
 
 def test_format_groups_separated_by_blank_line():
