@@ -22,6 +22,7 @@ from alarm_manager_server.services.owner_display import (
     _incident_owner_base_name,
     build_group_display_title,
 )
+from alarm_manager_server.cache import FileCache
 from alarm_manager_server.saymon.client import SaymonClient
 from alarm_manager_server.saymon.object_store import ObjectStore
 
@@ -48,13 +49,33 @@ class AlarmProcessor:
     ) -> None:
         self.cfg = cfg or settings
         self.client = client or SaymonClient.from_settings(self.cfg)
-        self.store = store or ObjectStore(self.client)
+        self.file_cache = FileCache(self.cfg.cache_dir, enabled=self.cfg.cache_enabled)
+        self.store = store or ObjectStore(
+            self.client,
+            file_cache=self.file_cache,
+            object_paths_ttl_sec=self.cfg.cache_ttl_object_paths_sec,
+        )
         self.macro_resolver = MacroResolver(self.store, depth=self.cfg.macro_depth)
-        self._state_labels: dict[str, str] | None = None
+        self._class_ids: set[str] | None = None
+
+        if self.cfg.cache_enabled:
+            self.store.load_snapshot_from_cache(ttl_sec=self.cfg.cache_ttl_objects_sec)
+
+    async def get_class_ids(self) -> set[str]:
+        if self._class_ids is not None:
+            return self._class_ids
+        cached = self.file_cache.get("class_ids", self.cfg.cache_ttl_class_ids_sec)
+        if isinstance(cached, list):
+            self._class_ids = {str(x) for x in cached}
+            return self._class_ids
+        self._class_ids = await self.client.resolve_class_ids_by_names(self.cfg.group_by_class_names)
+        self.file_cache.set("class_ids", sorted(self._class_ids))
+        return self._class_ids
 
     async def get_state_labels(self) -> dict[str, str]:
-        if self._state_labels is not None:
-            return self._state_labels
+        cached = self.file_cache.get("state_labels", self.cfg.cache_ttl_state_labels_sec)
+        if isinstance(cached, dict):
+            return {str(k): str(v) for k, v in cached.items()}
         labels: dict[str, str] = {}
         try:
             levels = await self.client.get_incident_levels()
@@ -65,14 +86,14 @@ class AlarmProcessor:
                     labels[str(level_id)] = str(name)
         except Exception:
             pass
-        self._state_labels = labels
+        self.file_cache.set("state_labels", labels)
         return labels
 
-    def status_label_for(self, status: int | str, labels: dict[str, str]) -> str:
-        key = str(status)
-        return labels.get(key, key)
+    def persist_caches(self) -> None:
+        """Write in-memory object graph to disk (call after /process)."""
+        self.store.persist_snapshot(ttl_sec=self.cfg.cache_ttl_objects_sec)
 
-    async def fetch_incidents(self) -> list[Incident]:
+    async def _fetch_incidents_from_api(self) -> list[Incident]:
         active_raw = await self.client.get_incidents(
             limit=self.cfg.fetch_limit,
             page_size=self.cfg.fetch_page_size,
@@ -106,8 +127,28 @@ class AlarmProcessor:
 
         return merge_active_and_history_incidents(active, history)
 
+    def status_label_for(self, status: int | str, labels: dict[str, str]) -> str:
+        key = str(status)
+        return labels.get(key, key)
+
+
+    async def fetch_incidents(self) -> list[Incident]:
+        cached = self.file_cache.get("incidents", self.cfg.cache_ttl_incidents_sec)
+        if isinstance(cached, list):
+            incidents = [Incident.model_validate(item) for item in cached]
+            for inc in incidents:
+                if inc.raw.get("owner") and isinstance(inc.raw.get("owner"), dict):
+                    self.store.seed_from_incident_owner(
+                        incident_object_id(inc),
+                        inc.raw["owner"],
+                    )
+            return incidents
+        incidents = await self._fetch_incidents_from_api()
+        self.file_cache.set("incidents", [inc.model_dump(mode="json") for inc in incidents])
+        return incidents
+
     async def compute_grouping(self, incidents: list[Incident]) -> GroupingResult:
-        class_ids = await self.client.resolve_class_ids_by_names(self.cfg.group_by_class_names)
+        class_ids = await self.get_class_ids()
 
         owner_grouping = group_by_owner(incidents, enabled=True)
         class_grouping, synthetic_seeds = group_by_class(
@@ -140,7 +181,7 @@ class AlarmProcessor:
 
         grouping = await self.compute_grouping(incidents)
 
-        class_ids = await self.client.resolve_class_ids_by_names(self.cfg.group_by_class_names)
+        class_ids = await self.get_class_ids()
         _, synthetic_seeds = group_by_class(
             incidents, self.store, class_ids, self.cfg.group_by_depth
         )

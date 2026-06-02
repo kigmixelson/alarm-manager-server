@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 from dataclasses import dataclass, field
 from typing import Any
+
+from alarm_manager_server.cache.file_cache import FileCache
 
 
 @dataclass
@@ -13,13 +16,22 @@ class ResolvedNode:
 
 
 class ObjectStore:
-    """In-memory object graph with optional SAYMON API backfill."""
+    """In-memory object graph with optional SAYMON API backfill and file cache."""
 
-    def __init__(self, client: Any | None = None) -> None:
+    def __init__(
+        self,
+        client: Any | None = None,
+        *,
+        file_cache: FileCache | None = None,
+        object_paths_ttl_sec: int = 0,
+    ) -> None:
         self._client = client
+        self._file_cache = file_cache
+        self._object_paths_ttl_sec = object_paths_ttl_sec
         self._objects: dict[str, dict[str, Any]] = {}
         self._paths_miss: set[str] = set()
         self._name_inflight: dict[str, asyncio.Task[str]] = {}
+        self._objects_dirty = False
 
     def seed_from_incident_owner(self, entity_id: str, owner: dict[str, Any] | None) -> None:
         if not owner:
@@ -83,12 +95,46 @@ class ObjectStore:
             existing["parent_ids"] = parent_ids
             existing["has_parents"] = True
         self._objects[obj_id] = existing
+        self._objects_dirty = True
 
     def upsert_parents(self, obj_id: str, parent_ids: list[str]) -> None:
         obj_id = str(obj_id)
         existing = self._objects.setdefault(obj_id, {"id": obj_id})
         existing["parent_ids"] = parent_ids
         existing["has_parents"] = True
+        self._objects_dirty = True
+
+    def export_snapshot(self) -> dict[str, Any]:
+        return {
+            "objects": copy.deepcopy(self._objects),
+            "paths_miss": sorted(self._paths_miss),
+        }
+
+    def import_snapshot(self, data: dict[str, Any] | None) -> None:
+        if not data:
+            return
+        objects = data.get("objects")
+        if isinstance(objects, dict):
+            self._objects = copy.deepcopy(objects)
+        miss = data.get("paths_miss")
+        if isinstance(miss, list):
+            self._paths_miss = {str(x) for x in miss}
+        self._objects_dirty = False
+
+    def persist_snapshot(self, *, ttl_sec: int) -> None:
+        if self._file_cache is None or ttl_sec <= 0:
+            return
+        self._file_cache.set("objects", self.export_snapshot())
+        self._objects_dirty = False
+
+    def load_snapshot_from_cache(self, *, ttl_sec: int) -> bool:
+        if self._file_cache is None or ttl_sec <= 0:
+            return False
+        payload = self._file_cache.get("objects", ttl_sec)
+        if not isinstance(payload, dict):
+            return False
+        self.import_snapshot(payload)
+        return True
 
     def peek_object(self, obj_id: str) -> dict[str, Any] | None:
         return self._objects.get(str(obj_id))
@@ -232,14 +278,20 @@ class ObjectStore:
 
         return order if order else None
 
-    async def _fetch_paths_and_cache(self, entity_id: str) -> None:
-        if self._client is None:
-            return
-        data = await self._client.get_object_paths(entity_id)
-        if data is None:
-            self._paths_miss.add(entity_id)
-            return
+    def _load_object_paths_cache(self) -> dict[str, Any]:
+        if self._file_cache is None or self._object_paths_ttl_sec <= 0:
+            return {}
+        payload = self._file_cache.get("object_paths", self._object_paths_ttl_sec)
+        return payload if isinstance(payload, dict) else {}
 
+    def _save_object_paths_entry(self, entity_id: str, data: dict[str, Any] | None) -> None:
+        if self._file_cache is None or self._object_paths_ttl_sec <= 0:
+            return
+        bucket = self._load_object_paths_cache()
+        bucket[str(entity_id)] = data
+        self._file_cache.set("object_paths", bucket)
+
+    def _apply_paths_payload(self, data: dict[str, Any]) -> None:
         paths = data.get("paths") or []
         objects = data.get("objects") or []
         parents_of: dict[str, set[str]] = {}
@@ -269,6 +321,31 @@ class ObjectStore:
                 properties=props,
                 parent_ids=parent_ids if parent_ids else None,
             )
+
+    async def _fetch_paths_and_cache(self, entity_id: str) -> None:
+        entity_id = str(entity_id)
+        if entity_id in self._paths_miss:
+            return
+
+        if self._file_cache is not None and self._object_paths_ttl_sec > 0:
+            bucket = self._load_object_paths_cache()
+            cached = bucket.get(entity_id)
+            if cached is not None:
+                if cached:
+                    self._apply_paths_payload(cached)
+                else:
+                    self._paths_miss.add(entity_id)
+                return
+
+        if self._client is None:
+            return
+        data = await self._client.get_object_paths(entity_id)
+        self._save_object_paths_entry(entity_id, data)
+        if data is None:
+            self._paths_miss.add(entity_id)
+            return
+
+        self._apply_paths_payload(data)
 
     def _upsert_from_api_payload(
         self,

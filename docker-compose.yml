@@ -1,0 +1,46 @@
+services:
+  server:
+    build: .
+    ports:
+      - "${SERVER_PORT:-4800}:4800"
+    env_file:
+      - .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - alarm-manager-cache:/var/cache/alarm-manager
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'python -c "import urllib.request; urllib.request.urlopen(''http://127.0.0.1:4800/health'')" || exit 1',
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  worker:
+    build: .
+    command:
+      - alarm-manager-worker
+      - --responsible
+      - --active
+      - --tickets
+    environment:
+      SERVER_URL: http://server:4800
+    env_file:
+      - .env
+    volumes:
+      - alarm-manager-data:/var/lib/alarm-manager
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      server:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  alarm-manager-cache:
+  alarm-manager-data:

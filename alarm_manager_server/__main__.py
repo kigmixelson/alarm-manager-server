@@ -7,7 +7,7 @@ def main() -> None:
     uvicorn.run(
         "alarm_manager_server.api.app:app",
         host="0.0.0.0",
-        port=8000,
+        port=4800,
         reload=False,
     )
 

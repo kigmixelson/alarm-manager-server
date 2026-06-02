@@ -24,9 +24,21 @@ class Settings(BaseSettings):
     history_limit: int = 5000
     fetch_page_size: int = 500
 
-    server_url: str = "http://127.0.0.1:8000"
+    server_url: str = "http://127.0.0.1:4800"
     worker_interval_sec: float = 60.0
     incident_link_template: str = "{saymon_base_url}/saymon.local/apps/alarm-manager?incident={id}"
+
+    cache_enabled: bool = True
+    cache_dir: str = "/var/cache/alarm-manager"
+    cache_ttl_incidents_sec: int = 120
+    cache_ttl_objects_sec: int = 3600
+    cache_ttl_object_paths_sec: int = 3600
+    cache_ttl_state_labels_sec: int = 86400
+    cache_ttl_class_ids_sec: int = 86400
+
+    tickets_file: str = "/var/lib/alarm-manager/tickets.json"
+    # Comma-separated import paths: module:Class (see worker/ticket_handlers.py)
+    ticket_handlers: str = ""
 
     @property
     def api_url(self) -> str:

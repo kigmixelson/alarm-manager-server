@@ -10,6 +10,7 @@ from alarm_manager_server.models.incident import (
     GroupingResult,
     ProcessedIncident,
     get_opened_at_ms,
+    incident_object_id,
     is_placeholder_object_name,
 )
 
@@ -22,6 +23,37 @@ class IncidentGroup:
     stats_line: str
     rows: list[str]
     responsible_line: str | None = None
+
+
+@dataclass(frozen=True)
+class GroupSpec:
+    """One console group before formatting (head + non-synthetic members)."""
+
+    head: ProcessedIncident
+    members: list[ProcessedIncident]
+
+
+@dataclass(frozen=True)
+class TrackedIncidentGroup:
+    """Group with stable key for ticket tracking across worker runs."""
+
+    group_key: str
+    head_id: str
+    member_ids: tuple[str, ...]
+    head: ProcessedIncident
+    members: list[ProcessedIncident]
+    display: IncidentGroup
+
+
+def compute_group_key(head: ProcessedIncident, members: list[ProcessedIncident]) -> str:
+    """Stable identity: synthetic container, owner object, or single incident."""
+    if head.is_synthetic:
+        return f"synth:{head.id}"
+    if len(members) > 1:
+        owner_id = incident_object_id(head)
+        if owner_id:
+            return f"owner:{owner_id}"
+    return f"inc:{head.id}"
 
 
 def _group_title(inc: ProcessedIncident) -> str:
@@ -207,16 +239,11 @@ def _make_incident_group(
     )
 
 
-def build_groups(
+def iter_group_specs(
     incidents: list[ProcessedIncident],
     grouping: GroupingResult,
-    cfg: Settings,
-    *,
-    active_only: bool = False,
-    show_responsible: bool = False,
-) -> list[IncidentGroup]:
-    """Top-level rows only; children are folded into their parent group."""
-    del cfg  # reserved for future output options
+) -> list[GroupSpec]:
+    """Collect group heads and members (no active-only filter)."""
     order: list[str] = []
     seen_order: set[str] = set()
     for inc in incidents:
@@ -225,7 +252,7 @@ def build_groups(
             order.append(inc.id)
 
     by_id = {inc.id: inc for inc in incidents}
-    groups: list[IncidentGroup] = []
+    specs: list[GroupSpec] = []
     shown_ids: set[str] = set()
 
     for inc_id in order:
@@ -243,30 +270,75 @@ def build_groups(
             member_ids = [inc.id]
 
         members = [by_id[mid] for mid in member_ids if mid in by_id and not by_id[mid].is_synthetic]
-        if active_only and is_all_cleared_group(members):
-            continue
-
-        group = _make_incident_group(inc, members, show_responsible=show_responsible)
-        if group is None:
+        if not members:
             continue
         for member in members:
             shown_ids.add(member.id)
-        groups.append(group)
+        specs.append(GroupSpec(head=inc, members=members))
 
     for inc_id in order:
         inc = by_id.get(inc_id)
         if inc is None or inc.is_synthetic or inc.id in shown_ids:
             continue
-        members = [inc]
-        if active_only and is_all_cleared_group(members):
-            continue
-        group = _make_incident_group(inc, members, show_responsible=show_responsible)
-        if group is None:
-            continue
+        specs.append(GroupSpec(head=inc, members=[inc]))
         shown_ids.add(inc.id)
-        groups.append(group)
 
-    return groups
+    return specs
+
+
+def build_tracked_groups(
+    incidents: list[ProcessedIncident],
+    grouping: GroupingResult,
+    cfg: Settings,
+    *,
+    active_only: bool = False,
+    show_responsible: bool = False,
+) -> list[TrackedIncidentGroup]:
+    del cfg
+    tracked: list[TrackedIncidentGroup] = []
+    for spec in iter_group_specs(incidents, grouping):
+        if active_only and is_all_cleared_group(spec.members):
+            continue
+        display = _make_incident_group(
+            spec.head,
+            spec.members,
+            show_responsible=show_responsible,
+        )
+        if display is None:
+            continue
+        member_ids = tuple(m.id for m in spec.members)
+        tracked.append(
+            TrackedIncidentGroup(
+                group_key=compute_group_key(spec.head, spec.members),
+                head_id=spec.head.id,
+                member_ids=member_ids,
+                head=spec.head,
+                members=spec.members,
+                display=display,
+            )
+        )
+    return tracked
+
+
+def build_groups(
+    incidents: list[ProcessedIncident],
+    grouping: GroupingResult,
+    cfg: Settings,
+    *,
+    active_only: bool = False,
+    show_responsible: bool = False,
+) -> list[IncidentGroup]:
+    """Top-level rows only; children are folded into their parent group."""
+    return [
+        g.display
+        for g in build_tracked_groups(
+            incidents,
+            grouping,
+            cfg,
+            active_only=active_only,
+            show_responsible=show_responsible,
+        )
+    ]
 
 
 def format_groups(groups: list[IncidentGroup]) -> str:

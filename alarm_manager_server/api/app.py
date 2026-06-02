@@ -15,6 +15,7 @@ from alarm_manager_server.services.processor import AlarmProcessor
 async def lifespan(_app: FastAPI):
     yield
     if _processor is not None:
+        _processor.persist_caches()
         await _processor.client.aclose()
 
 
@@ -68,7 +69,7 @@ async def process_incidents(
     incidents = await processor.fetch_incidents()
     grouping = await processor.compute_grouping(incidents)
 
-    class_ids = await processor.client.resolve_class_ids_by_names(processor.cfg.group_by_class_names)
+    class_ids = await processor.get_class_ids()
     from alarm_manager_server.services.grouping import build_synthetic_incidents, group_by_class
 
     _, synthetic_seeds = group_by_class(
@@ -99,6 +100,7 @@ async def process_incidents(
         )
 
     visible = processor.visible_rows(processed, grouping)
+    processor.persist_caches()
 
     return ProcessResponse(
         incidents=processed,
@@ -117,6 +119,7 @@ async def compute_grouping_only() -> GroupingResponse:
     processor = get_processor()
     incidents = await processor.fetch_incidents()
     grouping = await processor.compute_grouping(incidents)
+    processor.persist_caches()
     return GroupingResponse(
         children_of=grouping.children_of,
         parent_of=grouping.parent_of,

@@ -1,0 +1,17 @@
+[Unit]
+Description=Alarm Manager API (SAYMON grouping)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=alarm
+Group=alarm
+WorkingDirectory=/opt/alarm-manager-server
+EnvironmentFile=/opt/alarm-manager-server/.env
+ExecStart=/opt/alarm-manager-server/.venv/bin/alarm-manager-server
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
