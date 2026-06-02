@@ -124,7 +124,7 @@ def diff_snapshots(old: dict[str, Any], new: dict[str, Any]) -> list[str]:
 
 class TicketStore:
     def __init__(self, path: str | Path) -> None:
-        self.path = Path(path)
+        self.path = Path(path).expanduser()
         self._data: dict[str, Any] = {"next_seq": 1, "tickets": {}, "open_by_group_key": {}}
         self.load()
 

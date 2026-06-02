@@ -1,5 +1,12 @@
-from pydantic import SecretStr
+from pathlib import Path
+
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def default_data_dir() -> Path:
+    """User-writable state dir (local venv). Docker .env overrides with /var/... paths."""
+    return Path.home() / ".local" / "share" / "alarm-manager"
 
 
 class Settings(BaseSettings):
@@ -29,14 +36,14 @@ class Settings(BaseSettings):
     incident_link_template: str = "{saymon_base_url}/saymon.local/apps/alarm-manager?incident={id}"
 
     cache_enabled: bool = True
-    cache_dir: str = "/var/cache/alarm-manager"
+    cache_dir: str = Field(default_factory=lambda: str(default_data_dir() / "cache"))
     cache_ttl_incidents_sec: int = 120
     cache_ttl_objects_sec: int = 3600
     cache_ttl_object_paths_sec: int = 3600
     cache_ttl_state_labels_sec: int = 86400
     cache_ttl_class_ids_sec: int = 86400
 
-    tickets_file: str = "/var/lib/alarm-manager/tickets.json"
+    tickets_file: str = Field(default_factory=lambda: str(default_data_dir() / "tickets.json"))
     # Comma-separated import paths: module:Class (see worker/ticket_handlers.py)
     ticket_handlers: str = ""
 

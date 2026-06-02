@@ -87,6 +87,24 @@ curl -s -X POST "http://localhost:4800/process?resolve_macros=false" | head
 docker compose up -d server
 ```
 
+Однократный проход worker (CLI **внутри образа**, на хосте `alarm-manager-worker` не будет, если не делали `pip install .`):
+
+```bash
+docker compose run --rm worker alarm-manager-worker --once --active --responsible --tickets
+```
+
+`SERVER_URL` для этого запуска берётся из `docker-compose.yml` (`http://server:4800`); контейнер `server` должен уже работать.
+
+Локально на хосте (рядом с Docker-сервером на порту 4800):
+
+```bash
+python3 -m venv .venv && source .venv/bin/activate
+pip install .
+alarm-manager-worker --once --active --responsible --tickets --server-url http://127.0.0.1:4800
+# без установки в PATH:
+python3 -m alarm_manager_server.worker --once --active --responsible --tickets --server-url http://127.0.0.1:4800
+```
+
 Пересборка после изменений кода:
 
 ```bash
@@ -353,7 +371,7 @@ python3 -m alarm_manager_server.worker --server-url http://127.0.0.1:4800 --inte
 |-------------------|------------|
 | `--tickets` | Включить учёт между запусками |
 | `--tickets-file` | Путь к JSON (перекрывает `TICKETS_FILE`) |
-| `TICKETS_FILE` | По умолчанию `/var/lib/alarm-manager/tickets.json` |
+| `TICKETS_FILE` | Локально по умолчанию `~/.local/share/alarm-manager/tickets.json`; в Docker — `/var/lib/alarm-manager/tickets.json` (см. `.env`) |
 
 Файл создаётся автоматически; запись атомарная (через временный файл). Структура верхнего уровня:
 
@@ -379,6 +397,8 @@ python3 -m alarm_manager_server.worker --server-url http://127.0.0.1:4800 --inte
 В `snapshot` — заголовок, список id аварий и по каждой: состояние, текст, объект, ответственный, время (для diff).
 
 **Docker:** том `alarm-manager-data` → `/var/lib/alarm-manager`; в `command` worker: `--active --responsible --tickets`.
+
+**Локальный venv:** если в `.env` скопирован Docker-путь `TICKETS_FILE=/var/lib/...`, будет `Permission denied` — удалите строку или укажите `TICKETS_FILE=~/.local/share/alarm-manager/tickets.json`, либо `--tickets-file ./data/tickets.json`.
 
 ### Пример вывода
 

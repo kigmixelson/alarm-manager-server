@@ -16,7 +16,7 @@ class FileCache:
 
     def __init__(self, directory: str | Path, *, enabled: bool = True) -> None:
         self.enabled = enabled
-        self.directory = Path(directory)
+        self.directory = Path(directory).expanduser()
         if self.enabled:
             self.directory.mkdir(parents=True, exist_ok=True)
 
