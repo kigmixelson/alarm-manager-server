@@ -1,0 +1,122 @@
+"""Post Service Desk reference to SAYMON incidents after external ticket registration."""
+
+from __future__ import annotations
+
+import logging
+from typing import Any
+
+from alarm_manager_server.config import Settings, settings
+from alarm_manager_server.models.incident import Incident
+from alarm_manager_server.saymon.client import SaymonClient
+from alarm_manager_server.worker.tickets import TicketEvent, TicketStore
+
+logger = logging.getLogger(__name__)
+
+SYSTEM_LABELS: dict[str, str] = {
+    "jira": "Jira",
+    "redmine": "Redmine",
+    "freshdesk": "Freshdesk",
+    "servicenow": "ServiceNow",
+    "simpleone": "SimpleOne",
+    "naumen": "Naumen",
+    "elma": "ELMA365",
+    "bitrix24": "Битрикс24",
+}
+
+
+def format_saymon_sd_comment(
+    *,
+    local_ticket_id: str,
+    external_refs: dict[str, str],
+    template: str,
+) -> str:
+    lines: list[str] = []
+    for system, ref in sorted(external_refs.items()):
+        label = SYSTEM_LABELS.get(system, system)
+        lines.append(
+            template.format(
+                system=label,
+                external_ref=ref,
+                local_ticket_id=local_ticket_id,
+            )
+        )
+    if len(lines) == 1:
+        return lines[0]
+    header = f"Зарегистрировано во внешней системе (тикет {local_ticket_id}):"
+    return header + "\n" + "\n".join(f"- {line}" for line in lines)
+
+
+def _member_ids_from_ticket(ticket: dict[str, Any]) -> list[str]:
+    snap = ticket.get("snapshot") or {}
+    raw = snap.get("member_ids") or []
+    return [str(x) for x in raw if x]
+
+
+async def annotate_saymon_incidents_on_registration(
+    events: list[TicketEvent],
+    store: TicketStore,
+    incidents_by_id: dict[str, Incident],
+    cfg: Settings | None = None,
+) -> None:
+    """After CREATE + successful external registration, comment on active SAYMON incidents."""
+    cfg = cfg or settings
+    if not cfg.ticket_saymon_comment_enabled:
+        return
+    if not cfg.saymon_login or not cfg.saymon_password.get_secret_value().strip():
+        logger.debug("SAYMON credentials missing; skip incident SD comments")
+        return
+
+    create_events = [e for e in events if e.action == "created"]
+    if not create_events:
+        return
+
+    client = SaymonClient.from_settings(cfg)
+    dirty = False
+    try:
+        for event in create_events:
+            ticket = store.get_ticket(event.ticket_id)
+            if not isinstance(ticket, dict):
+                continue
+            meta = ticket.setdefault("external_meta", {})
+            refs = meta.get("external_refs")
+            if not isinstance(refs, dict) or not refs:
+                continue
+
+            commented: dict[str, Any] = meta.setdefault("saymon_sd_comments", {})
+            if not isinstance(commented, dict):
+                commented = {}
+                meta["saymon_sd_comments"] = commented
+
+            comment = format_saymon_sd_comment(
+                local_ticket_id=event.ticket_id,
+                external_refs={str(k): str(v) for k, v in refs.items() if v},
+                template=cfg.ticket_saymon_comment_template,
+            )
+            for inc_id in _member_ids_from_ticket(ticket):
+                if inc_id in commented:
+                    continue
+                inc = incidents_by_id.get(inc_id)
+                if inc is not None and inc.is_history:
+                    logger.debug("skip history incident %s for SD comment", inc_id)
+                    continue
+                try:
+                    await client.add_incident_comment(inc_id, comment)
+                    commented[inc_id] = dict(refs)
+                    dirty = True
+                    logger.info(
+                        "SAYMON comment on incident %s for %s refs=%s",
+                        inc_id,
+                        event.ticket_id,
+                        refs,
+                    )
+                except Exception:
+                    logger.exception(
+                        "failed SAYMON comment on incident %s for %s",
+                        inc_id,
+                        event.ticket_id,
+                    )
+    finally:
+        await client.aclose()
+
+    if dirty:
+        store.save()

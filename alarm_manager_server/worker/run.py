@@ -11,10 +11,10 @@ from datetime import UTC, datetime
 from alarm_manager_server.config import settings
 from alarm_manager_server.worker.client import ProcessApiClient
 from alarm_manager_server.worker.formatter import build_groups, build_tracked_groups, format_groups
+from alarm_manager_server.worker.incident_comments import annotate_saymon_incidents_on_registration
 from alarm_manager_server.worker.ticket_handlers import (
     dispatch_ticket_handlers,
-    load_ticket_handlers,
-    parse_handler_specs,
+    resolve_ticket_handlers,
 )
 from alarm_manager_server.worker.tickets import TicketStore, format_ticket_events, sync_tickets
 
@@ -62,13 +62,15 @@ async def run_once(
             if e.action == "closed"
             or (e.group is not None and e.group.group_key in visible_keys)
         ]
-        handler_specs = parse_handler_specs(
-            cli_handlers=ticket_handler_specs,
-            env_value=settings.ticket_handlers,
-        )
-        if handler_specs:
-            handlers = load_ticket_handlers(handler_specs)
+        handlers = resolve_ticket_handlers(cli_handlers=ticket_handler_specs)
+        if handlers:
             dispatch_ticket_handlers(handlers, store, events)
+            await annotate_saymon_incidents_on_registration(
+                events,
+                store,
+                incidents_by_id,
+                settings,
+            )
         groups = [g.display for g in visible_tracked]
         text = format_ticket_events(events)
         incident_rows = sum(len(group.rows) for group in groups)

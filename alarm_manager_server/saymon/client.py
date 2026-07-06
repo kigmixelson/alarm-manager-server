@@ -140,6 +140,20 @@ class SaymonClient:
                 return None
             raise
 
+    async def add_incident_comment(self, incident_id: str, text: str) -> None:
+        """POST /incidents/:id/comment — plain text body (active incidents only)."""
+        client = await self._get_client()
+        headers = {
+            **self._request_headers(client),
+            "Content-Type": "text/plain",
+        }
+        response = await client.post(
+            f"/incidents/{incident_id}/comment",
+            content=text.encode("utf-8"),
+            headers=headers,
+        )
+        response.raise_for_status()
+
     async def resolve_class_ids_by_names(self, names: list[str]) -> set[str]:
         classes = await self.get_classes()
         name_index: dict[str, str] = {}

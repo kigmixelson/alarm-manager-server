@@ -21,7 +21,8 @@
 - **Приоритет owner** над class-группировкой при слиянии
 - **Ответственные** — макросы вида `{{parent[class.id=...].properties[...]}}`
 - **Тикеты групп** (`--tickets`) — между запусками worker: создать / обновить / закрыть «тикет» на каждую группу; состояние в `TICKETS_FILE` (см. [ниже](#тикеты-между-запусками-worker---tickets))
-- **Handlers внешней SD** (`TICKET_HANDLERS` / `--ticket-handler`) — регистрация заявок в service desk из Python
+- **Handlers внешней SD** (`TICKET_HANDLERS` / `--ticket-handler`) — регистрация заявок из Python
+- **Плагины** Jira, Redmine, Freshdesk, ServiceNow, SimpleOne, Naumen, ELMA365, Битрикс24 — автоматически из `.env` (см. [ниже](#плагины-внешних-service-desk))
 
 ---
 
@@ -418,6 +419,130 @@ Router-A (Host)
   причина: все аварии Cleared
 ```
 
+### Плагины внешних Service Desk
+
+Каталог [`alarm_manager_server/plugins/`](alarm_manager_server/plugins/): интеграции включаются автоматически при заполнении обязательных переменных в `.env`. Работают с `--tickets`.
+
+| Плагин | Обязательные переменные | Поведение |
+|--------|-------------------------|-----------|
+| **Jira** | `JIRA_BASE_URL`, `JIRA_USER`, `JIRA_API_TOKEN`, `JIRA_PROJECT_KEY` | CREATE → issue; UPDATE/CLOSE → комментарий; опционально transition |
+| **Redmine** | `REDMINE_BASE_URL`, `REDMINE_API_KEY`, `REDMINE_PROJECT_ID` | CREATE → issue; UPDATE/CLOSE → journal |
+| **Freshdesk** | `FRESHDESK_BASE_URL`, `FRESHDESK_API_KEY`, `FRESHDESK_REQUESTER_EMAIL` | CREATE → ticket; UPDATE/CLOSE → note |
+| **ServiceNow** | `SERVICENOW_INSTANCE_URL` + (`SERVICENOW_USER`/`PASSWORD` или `OAUTH_TOKEN`) | CREATE → incident; UPDATE/CLOSE → `work_notes`; CLOSE → state |
+| **SimpleOne** | `SIMPLEONE_BASE_URL`, `SIMPLEONE_API_TOKEN`, `SIMPLEONE_CALLER` | CREATE → `itsm_incident`; UPDATE/CLOSE → `work_notes` (PATCH) |
+| **Naumen** | `NAUMEN_BASE_URL`, `NAUMEN_ACCESS_KEY`, `NAUMEN_CLIENT`, `NAUMEN_CLIENT_EMPLOYEE`, `NAUMEN_AGREEMENT`, `NAUMEN_SERVICE` | CREATE → заявка (`create-m2m`); UPDATE → комментарий; CLOSE → `edit` (state + resultDescr) |
+| **ELMA365** | `ELMA_BASE_URL`, `ELMA_API_TOKEN`, `ELMA_NAMESPACE`, `ELMA_APP_CODE` | CREATE → элемент приложения; UPDATE/CLOSE → сообщение в ленте; CLOSE → `set-status` |
+| **Битрикс24** | `BITRIX24_WEBHOOK_URL`, `BITRIX24_RESPONSIBLE_ID` | CREATE → задача (`tasks.task.add`); UPDATE/CLOSE → комментарий; CLOSE → `tasks.task.complete` |
+
+Пример `.env` для Jira Cloud:
+
+```env
+JIRA_BASE_URL=https://your-domain.atlassian.net
+JIRA_USER=bot@example.com
+JIRA_API_TOKEN=your-api-token
+JIRA_PROJECT_KEY=OPS
+JIRA_ISSUE_TYPE=Task
+JIRA_CLOSE_TRANSITION=Done
+```
+
+Пример для Redmine:
+
+```env
+REDMINE_BASE_URL=https://redmine.example.com
+REDMINE_API_KEY=your-api-key
+REDMINE_PROJECT_ID=42
+REDMINE_TRACKER_ID=1
+REDMINE_STATUS_CLOSED_ID=5
+```
+
+Пример для Freshdesk:
+
+```env
+FRESHDESK_BASE_URL=https://your-domain.freshdesk.com
+FRESHDESK_API_KEY=your-api-key
+FRESHDESK_REQUESTER_EMAIL=monitoring@example.com
+FRESHDESK_PRIORITY=2
+FRESHDESK_STATUS_OPEN=2
+FRESHDESK_STATUS_CLOSED=5
+```
+
+Пример для ServiceNow:
+
+```env
+SERVICENOW_INSTANCE_URL=https://your-instance.service-now.com
+SERVICENOW_USER=integration_user
+SERVICENOW_PASSWORD=...
+SERVICENOW_CALLER_ID=sys_id_пользователя
+SERVICENOW_CLOSE_STATE=7
+```
+
+Пример для SimpleOne:
+
+```env
+SIMPLEONE_BASE_URL=https://sandbox.dev.simpleone.ru
+SIMPLEONE_API_TOKEN=...
+SIMPLEONE_CALLER=155931135900000001
+SIMPLEONE_CONTACT_TYPE=email
+```
+
+Пример для Naumen (ITSM 365):
+
+```env
+NAUMEN_BASE_URL=https://your-tenant.itsm365.com/sd
+NAUMEN_ACCESS_KEY=8a5d0671-ae00-4870-8751-229ed963932b
+NAUMEN_META_CLASS=serviceCall$serviceCall
+NAUMEN_CLIENT=ou$1546201
+NAUMEN_CLIENT_EMPLOYEE=employee$1545902
+NAUMEN_AGREEMENT=agreement$1492401
+NAUMEN_SERVICE=slmService$5602
+NAUMEN_OFFICE=ou$2283501
+NAUMEN_CLOSE_STATE=resolved
+NAUMEN_CLOSE_CODE=resolved
+```
+
+UUID контрагента, сотрудника, контракта и услуги можно получить через REST `find/employee/{login}` и `get/agreement$…` (см. [документацию Naumen](https://nsdlab.ru/blog/api)). Ключ: `api.auth.getAccessKey('login')` в консоли SMP.
+
+Пример для ELMA365:
+
+```env
+ELMA_BASE_URL=https://company.elma365.ru
+ELMA_API_TOKEN=...
+ELMA_NAMESPACE=service_desk
+ELMA_APP_CODE=incident
+ELMA_TITLE_FIELD=__name
+ELMA_DESCRIPTION_FIELD=description
+ELMA_CLOSE_STATUS=closed
+ELMA_CONTEXT_EXTRA={"service":"network"}
+```
+
+Коды полей (`ELMA_TITLE_FIELD`, `ELMA_DESCRIPTION_FIELD`) смотрите в API-справке приложения в ELMA365. Токен: Администрирование → API. Документация: [api.elma365.com](https://api.elma365.com/ru/public-api/guides/IntroWebAPI/).
+
+Пример для Битрикс24:
+
+```env
+BITRIX24_WEBHOOK_URL=https://portal.bitrix24.ru/rest/1/xxxxxxxxxxxxxxxx
+BITRIX24_RESPONSIBLE_ID=1
+BITRIX24_CREATED_BY=1
+BITRIX24_COMPLETE_ON_CLOSE=true
+```
+
+Webhook создаётся в Битрикс24: **Разработчикам → Другое → Входящий webhook** (права: `task`, минимум `tasks` + `task`). `BITRIX24_RESPONSIBLE_ID` — ID пользователя-исполнителя.
+
+`REDMINE_STATUS_CLOSED_ID=0` — при CLOSE только комментарий. `SERVICENOW_CLOSE_STATE` / `SIMPLEONE_CLOSE_STATE` пустые — при CLOSE только `work_notes`. `NAUMEN_CLOSE_STATE` / `NAUMEN_CLOSE_CODE` пустые — при CLOSE только `resultDescr`.
+
+Id сохраняются в `TICKETS_FILE`: `external_ref` (номер заявки, напр. `INC0001234`) и `external_meta.sys_id` для последующих UPDATE/CLOSE.
+
+### Комментарий в SAYMON после регистрации
+
+После успешного **CREATE** во внешней системе worker добавляет комментарий в **активные** аварии группы (не history) через `POST /node/api/incidents/:id/comment`:
+
+- включено по умолчанию: `TICKET_SAYMON_COMMENT_ENABLED=true`
+- шаблон: `TICKET_SAYMON_COMMENT_TEMPLATE` (плейсхолдеры `{system}`, `{external_ref}`, `{local_ticket_id}`)
+- на worker нужны те же **`SAYMON_LOGIN` / `SAYMON_PASSWORD` / `SAYMON_BASE_URL`**, что и у server (прямой вызов API ЦП)
+- повторный комментарий на тот же инцидент не отправляется (`external_meta.saymon_sd_comments`)
+
+Модули: `plugins/jira.py`, `redmine.py`, `freshdesk.py`, `servicenow.py`, `simpleone.py`, `naumen.py`, `elma.py`, `bitrix24.py`.
+
 ### Внешний handler (`TICKET_HANDLERS`)
 
 Чтобы **регистрировать тикеты во внешней системе** (service desk, Jira, webhook), укажите Python-класс или функцию, возвращающую экземпляр с методом `on_ticket_event`:
@@ -498,7 +623,16 @@ alarm-manager-worker --responsible --active --tickets \
 | `CACHE_DIR` | Каталог JSON-файлов кеша (в Docker по умолчанию `/var/cache/alarm-manager`, смонтирован томом) |
 | `CACHE_TTL_*_SEC` | Время жизни записи по типам данных (см. ниже); `0` — не использовать кеш для этого типа |
 | `TICKETS_FILE` | JSON с тикетами worker (`--tickets`) |
-| `TICKET_HANDLERS` | Handlers внешней SD через запятую: `pkg.mod:Handler` |
+| `TICKET_HANDLERS` | Доп. handlers: `pkg.mod:Handler` (поверх плагинов) |
+| `JIRA_*` | Jira: URL, user, token, project, issue type, transition (см. `.env.example`) |
+| `REDMINE_*` | Redmine: URL, API key, project, tracker, closed status id |
+| `FRESHDESK_*` | Freshdesk |
+| `SERVICENOW_*` | ServiceNow Table API |
+| `SIMPLEONE_*` | SimpleOne Table API |
+| `NAUMEN_*` | Naumen / ITSM 365 REST API |
+| `ELMA_*` | ELMA365 Public API |
+| `BITRIX24_*` | Битрикс24 incoming webhook (задачи) |
+| `TICKET_SAYMON_COMMENT_*` | Комментарий в SAYMON после CREATE во внешней SD |
 
 ---
 
@@ -561,11 +695,21 @@ alarm_manager_server/
 │   └── owner_display.py
 ├── cache/                  # file_cache.py — JSON на диске с TTL
 ├── saymon/                 # client, object_store, auth
+├── plugins/                # Jira, Redmine, Freshdesk, ServiceNow, SimpleOne, Naumen, ELMA, Bitrix24
+│   ├── jira.py
+│   ├── redmine.py
+│   ├── freshdesk.py
+│   ├── servicenow.py
+│   ├── simpleone.py
+│   ├── naumen.py
+│   ├── elma.py
+│   ├── bitrix24.py
+│   └── registry.py
 └── worker/
     ├── run.py              # CLI
     ├── formatter.py        # группы для консоли
     ├── tickets.py          # CREATE / UPDATE / CLOSE, TICKETS_FILE
-    ├── ticket_handlers.py  # загрузка TICKET_HANDLERS, dispatch
+    ├── ticket_handlers.py  # TICKET_HANDLERS, dispatch
     └── client.py           # HTTP к /process
 ```
 

@@ -158,6 +158,7 @@ Alarm Manager Server работает как **воронка сужения**:
 - В лог пишутся только **изменения** (`+1 ~2 −1` в шапке цикла), а не тысячи строк повторно.
 - Внешняя система может парсить stdout (`[CREATE|UPDATE|CLOSE T-…]`) или JSON-файл по `ticket_id`.
 - **`TICKET_HANDLERS`** — подключаемый Python-handler (`module:Class`), который на CREATE/UPDATE/CLOSE создаёт или обновляет заявку в service desk и сохраняет её id в поле `external_ref` локального тикета.
+- **Плагины** Jira, Redmine, Freshdesk, ServiceNow, SimpleOne, Naumen, ELMA365, Битрикс24 в `alarm_manager_server/plugins/` — достаточно заполнить переменные в `.env`.
 
 Техническая спецификация (ключи групп, JSON, handlers, флаги CLI): [README.md — «Тикеты между запусками worker»](README.md#тикеты-между-запусками-worker---tickets).
 

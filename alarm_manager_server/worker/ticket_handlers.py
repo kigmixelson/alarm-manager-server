@@ -8,6 +8,8 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
+from alarm_manager_server.config import Settings, settings
+from alarm_manager_server.plugins.registry import discover_ticket_handlers
 from alarm_manager_server.worker.tickets import (
     TicketEvent,
     TicketStore,
@@ -158,17 +160,38 @@ def parse_handler_specs(
     return specs
 
 
+def resolve_ticket_handlers(
+    *,
+    cli_handlers: list[str] | None = None,
+    cfg: Settings | None = None,
+) -> list[TicketHandler]:
+    """Explicit TICKET_HANDLERS + auto-enabled plugins from .env."""
+    cfg = cfg or settings
+    specs = parse_handler_specs(cli_handlers=cli_handlers, env_value=cfg.ticket_handlers)
+    handlers: list[TicketHandler] = []
+    if specs:
+        handlers.extend(load_ticket_handlers(specs))
+    handlers.extend(discover_ticket_handlers(cfg))
+    return handlers
+
+
 def apply_handler_results(ticket: dict[str, Any], result: HandlerResult | None) -> None:
     if result is None:
         return
-    if result.external_ref is not None:
-        ticket["external_ref"] = result.external_ref
     if result.external_meta:
         existing = ticket.get("external_meta")
         if isinstance(existing, dict):
             existing.update(result.external_meta)
         else:
             ticket["external_meta"] = dict(result.external_meta)
+    if result.external_ref is not None:
+        ticket["external_ref"] = result.external_ref
+        system = (result.external_meta or {}).get("system")
+        if system:
+            meta = ticket.setdefault("external_meta", {})
+            refs = meta.setdefault("external_refs", {})
+            if isinstance(refs, dict):
+                refs[str(system)] = result.external_ref
 
 
 def dispatch_ticket_handlers(
