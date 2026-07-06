@@ -126,6 +126,20 @@ class Settings(BaseSettings):
     bitrix24_comment_author_id: int = 0
     bitrix24_complete_on_close: bool = True
 
+    # --- HP Service Manager / Service Desk plugin ---
+    hpsm_base_url: str = ""
+    hpsm_user: str = ""
+    hpsm_password: SecretStr = SecretStr("")
+    hpsm_collection: str = "incidents"
+    hpsm_resource_name: str = "Incident"
+    hpsm_impact: str = "3"
+    hpsm_urgency: str = "3"
+    hpsm_category: str = "incident"
+    hpsm_assignment_group: str = ""
+    hpsm_affected_ci: str = ""
+    hpsm_close_status: str = "Closed"
+    hpsm_closure_code: str = ""
+
     # Comment on SAYMON incidents after external ticket CREATE
     ticket_saymon_comment_enabled: bool = True
     ticket_saymon_comment_template: str = "Service Desk ({system}): {external_ref}"
@@ -199,6 +213,14 @@ class Settings(BaseSettings):
         return bool(
             self.bitrix24_webhook_url.strip()
             and self.bitrix24_responsible_id > 0
+        )
+
+    @property
+    def hpsm_enabled(self) -> bool:
+        return bool(
+            self.hpsm_base_url.strip()
+            and self.hpsm_user.strip()
+            and self.hpsm_password.get_secret_value().strip()
         )
 
     @property

@@ -8,6 +8,7 @@ from alarm_manager_server.config import Settings, settings
 from alarm_manager_server.plugins.bitrix24 import Bitrix24TicketHandler
 from alarm_manager_server.plugins.elma import ElmaTicketHandler
 from alarm_manager_server.plugins.freshdesk import FreshdeskTicketHandler
+from alarm_manager_server.plugins.hpsm import HpServiceManagerTicketHandler
 from alarm_manager_server.plugins.jira import JiraTicketHandler
 from alarm_manager_server.plugins.redmine import RedmineTicketHandler
 from alarm_manager_server.plugins.naumen import NaumenTicketHandler
@@ -26,6 +27,7 @@ _PLUGIN_FACTORIES = (
     ("naumen", NaumenTicketHandler.from_settings),
     ("elma", ElmaTicketHandler.from_settings),
     ("bitrix24", Bitrix24TicketHandler.from_settings),
+    ("hpsm", HpServiceManagerTicketHandler.from_settings),
 )
 
 

@@ -21,6 +21,7 @@ SYSTEM_LABELS: dict[str, str] = {
     "naumen": "Naumen",
     "elma": "ELMA365",
     "bitrix24": "Битрикс24",
+    "hpsm": "HP Service Manager",
 }
 
 
