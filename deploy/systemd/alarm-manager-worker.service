@@ -10,7 +10,7 @@ User=alarm
 Group=alarm
 WorkingDirectory=/opt/alarm-manager-server
 EnvironmentFile=/opt/alarm-manager-server/.env
-ExecStart=/opt/alarm-manager-server/.venv/bin/alarm-manager-worker --responsible
+ExecStart=/opt/alarm-manager-server/.venv/bin/alarm-manager-worker --responsible --active --tickets
 Restart=on-failure
 RestartSec=30
 

@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -139,6 +140,38 @@ class Settings(BaseSettings):
     hpsm_affected_ci: str = ""
     hpsm_close_status: str = "Closed"
     hpsm_closure_code: str = ""
+
+    # Oracle ticket function (credentials are never included in repr).
+    oracle_dsn: str = ""
+    oracle_user: str = ""
+    oracle_password: SecretStr = SecretStr("")
+    oracle_id_dept: int | None = None
+    oracle_id_build: int | None = None
+    oracle_id_def: int | None = None
+    oracle_id_monit: int | None = None
+    oracle_event: Literal["created", "closed"] = "created"
+    oracle_b_date: str = ""
+    oracle_e_date: str = ""
+    oracle_timezone: str = "Europe/Moscow"
+    oracle_name_equip: str = ""
+    oracle_name_defect: str = ""
+    oracle_executed_work: str = ""
+    oracle_location: str = ""
+    oracle_result_id_column: str = ""
+    oracle_connect_timeout_sec: float = Field(default=10, gt=0)
+    oracle_call_timeout_ms: int = Field(default=30000, gt=0)
+
+    @property
+    def oracle_enabled(self) -> bool:
+        return bool(
+            self.oracle_dsn.strip()
+            and self.oracle_user.strip()
+            and self.oracle_password.get_secret_value()
+            and all(value is not None for value in (
+                self.oracle_id_dept, self.oracle_id_build,
+                self.oracle_id_def, self.oracle_id_monit,
+            ))
+        )
 
     # Comment on SAYMON incidents after external ticket CREATE
     ticket_saymon_comment_enabled: bool = True

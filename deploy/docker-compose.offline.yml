@@ -1,0 +1,39 @@
+name: alarm-manager
+
+services:
+  server:
+    image: ${ALARM_MANAGER_IMAGE:-alarm-manager-server:offline}
+    pull_policy: never
+    ports:
+      - "${SERVER_PORT:-4800}:4800"
+    env_file: .env
+    environment:
+      CACHE_DIR: /var/cache/alarm-manager
+    volumes:
+      - alarm-manager-cache:/var/cache/alarm-manager
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4800/health', timeout=5)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  worker:
+    image: ${ALARM_MANAGER_IMAGE:-alarm-manager-server:offline}
+    pull_policy: never
+    command: ["alarm-manager-worker", "--responsible", "--active", "--tickets"]
+    env_file: .env
+    environment:
+      SERVER_URL: http://server:4800
+      TICKETS_FILE: /var/lib/alarm-manager/tickets.json
+    volumes:
+      - alarm-manager-data:/var/lib/alarm-manager
+    depends_on:
+      server:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  alarm-manager-cache:
+  alarm-manager-data:
