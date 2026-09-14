@@ -9,7 +9,6 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
 from alarm_manager_server.config import Settings, settings
-from alarm_manager_server.plugins.registry import discover_ticket_handlers
 from alarm_manager_server.worker.tickets import (
     TicketEvent,
     TicketStore,
@@ -166,6 +165,10 @@ def resolve_ticket_handlers(
     cfg: Settings | None = None,
 ) -> list[TicketHandler]:
     """Explicit TICKET_HANDLERS + auto-enabled plugins from .env."""
+    # Plugins subclass BaseTicketHandler and import the context defined above.
+    # Load the registry only after this module has finished initialization.
+    from alarm_manager_server.plugins.registry import discover_ticket_handlers
+
     cfg = cfg or settings
     specs = parse_handler_specs(cli_handlers=cli_handlers, env_value=cfg.ticket_handlers)
     handlers: list[TicketHandler] = []

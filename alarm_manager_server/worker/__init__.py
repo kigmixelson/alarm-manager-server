@@ -1,5 +1,11 @@
 """Background worker that polls alarm-manager-server and prints grouping results."""
 
-from .run import main
-
 __all__ = ["main"]
+
+
+def __getattr__(name: str):
+    if name == "main":
+        from .run import main
+
+        return main
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
