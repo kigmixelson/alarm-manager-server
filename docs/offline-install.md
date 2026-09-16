@@ -330,3 +330,26 @@ worker, без повторного вызова Oracle. Успешно дост
 приёмке интеграции.
 
 Логи доставки: `Oracle status comment delivered`, ошибки: `Oracle status comment failed`.
+
+## 10. SAYMON с самоподписанным HTTPS-сертификатом
+
+Если `/process` возвращает 502 с `CERTIFICATE_VERIFY_FAILED`, отключите проверку
+сертификата SAYMON в рабочем `.env`:
+
+```env
+SAYMON_VERIFY_SSL=false
+```
+
+Настройка действует для авторизации, редиректа авторизации, получения данных и
+комментариев SAYMON. По умолчанию проверка включена (`true`).
+
+После установки образа с поддержкой этой настройки пересоздайте оба сервиса:
+
+```bash
+docker compose -f compose.yml up -d --no-build --pull never --force-recreate server worker
+docker compose -f compose.yml logs -f --tail=100 server worker
+```
+
+Обычный `restart` не подхватывает изменённые переменные окружения контейнера.
+Для systemd после изменения `.env`: `systemctl restart alarm-manager-server alarm-manager-worker`.
+Проверяйте успешный ответ `/process` и проход worker: `/health` не проверяет соединение с SAYMON.

@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     saymon_base_url: str = "http://localhost:8080"
+    saymon_verify_ssl: bool = True
     saymon_api_prefix: str = "/node/api"
     saymon_login: str = ""
     saymon_password: SecretStr = SecretStr("")

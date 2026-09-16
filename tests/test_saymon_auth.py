@@ -115,3 +115,25 @@ async def test_client_follows_redirect_url_after_login():
     await client.get_classes()
     assert redirect_hit
     await client.aclose()
+
+
+@pytest.mark.parametrize("verify", [True, False])
+@pytest.mark.parametrize("auth_first", [True, False])
+async def test_ssl_setting_applies_to_api_and_auth(verify, auth_first):
+    from unittest.mock import AsyncMock, patch
+    from alarm_manager_server.config import Settings
+
+    cfg = Settings(_env_file=None, saymon_base_url="https://saymon.test",
+                   saymon_login="bot", saymon_password="secret", saymon_verify_ssl=verify)
+    client = SaymonClient.from_settings(cfg)
+    http = AsyncMock()
+    http.cookies = httpx.Cookies({"sid": "session", "csrf": "token"})
+    http.post.return_value = httpx.Response(200, request=httpx.Request("POST", "https://saymon.test"))
+    with patch("alarm_manager_server.saymon.client.httpx.AsyncClient", return_value=http) as factory:
+        if auth_first:
+            await client._ensure_authenticated()
+        await client._get_client()
+        await client.add_incident_comment("i1", "Test")
+        assert factory.call_count == 1
+        assert factory.call_args.kwargs["verify"] is verify
+    await client.aclose()

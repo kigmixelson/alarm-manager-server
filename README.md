@@ -630,6 +630,7 @@ alarm-manager-worker --responsible --active --tickets \
 
 | Переменная | Назначение |
 |------------|------------|
+| `SAYMON_VERIFY_SSL` | Проверка HTTPS-сертификата SAYMON; `false` отключает проверку, по умолчанию `true` |
 | `SAYMON_BASE_URL` | Базовый URL SAYMON |
 | `SAYMON_LOGIN`, `SAYMON_PASSWORD` | Учётная запись API |
 | `SAYMON_AUTH_REDIRECT_URL` | Опциональный GET после логина |

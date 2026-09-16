@@ -42,3 +42,6 @@ cp docs/*.md "$out/docs/"
   fi
 )
 printf 'Offline bundle: %s\n' "$out"
+
+tar -czf "${out}.tar.gz" "$out"
+printf 'Bunndle: %s\n' "${out}.tar.gz"

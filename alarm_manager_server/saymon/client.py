@@ -28,6 +28,7 @@ class SaymonClient:
         saymon_base_url: str,
         auth_redirect_url: str | None = None,
         timeout: float = 30.0,
+        verify_ssl: bool = True,
     ) -> None:
         self._base = base_api_url.rstrip("/")
         self._saymon_base = saymon_base_url.rstrip("/")
@@ -35,6 +36,7 @@ class SaymonClient:
         self._password = password
         self._auth_redirect_url = (auth_redirect_url or "").strip() or None
         self._timeout = timeout
+        self._verify_ssl = verify_ssl
         self._client: httpx.AsyncClient | None = None
         self._authenticated = False
         self._auth_lock = asyncio.Lock()
@@ -47,6 +49,7 @@ class SaymonClient:
             password=cfg.saymon_password.get_secret_value(),
             saymon_base_url=cfg.saymon_base_url,
             auth_redirect_url=cfg.saymon_auth_redirect_url,
+            verify_ssl=cfg.saymon_verify_ssl,
         )
 
     async def aclose(self) -> None:
@@ -175,6 +178,7 @@ class SaymonClient:
             self._client = httpx.AsyncClient(
                 base_url=self._base,
                 timeout=self._timeout,
+                verify=self._verify_ssl,
                 follow_redirects=True,
             )
         await self._ensure_authenticated()
@@ -194,6 +198,7 @@ class SaymonClient:
                 client = httpx.AsyncClient(
                     base_url=self._base,
                     timeout=self._timeout,
+                    verify=self._verify_ssl,
                     follow_redirects=True,
                 )
                 self._client = client
