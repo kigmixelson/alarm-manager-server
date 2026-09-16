@@ -414,7 +414,7 @@ DSN, логин, пароль и ID остаются прежними. Для Li
 
 ```bash
 docker compose -f compose.yml stop worker
-docker compose -f compose.yml run --rm --no-deps --pull never worker \
+docker compose -f compose.yml run --rm --no-deps worker \
   python -m alarm_manager_server.plugins.oracle_check
 ```
 
@@ -439,3 +439,23 @@ OK` проверяет аутентификацию, а `Oracle confirmed` — �
 
 Источники: [инициализация Thick](https://python-oracledb.readthedocs.io/en/latest/user_guide/initialization.html),
 [Oracle Instant Client](https://www.oracle.com/database/technologies/instant-client/linux-x86-64-downloads.html).
+
+
+### Старый Compose или отсутствующий oracle_check
+
+Некоторые версии Compose не поддерживают `--pull` у `run`. Используйте команду
+без этого флага; поставляемый `compose.yml` уже задаёт `pull_policy: never`.
+Если Python сообщает `No module named ...oracle_check`, выбранный образ не
+содержит диагностический модуль. Для проверки наличия Oracle Client без него:
+
+```bash
+docker compose -f compose.yml run --rm --no-deps worker python -c \
+  'import oracledb; oracledb.init_oracle_client(); print("Thick client OK:", oracledb.clientversion())'
+```
+
+Эта команда проверяет только загрузку библиотек, не подключение к БД.
+`DPI-1047` — нужен образ с Instant Client. Убедитесь, что диагностический модуль
+`alarm_manager_server/plugins/oracle_check.py` также включён в исходники поставки
+перед сборкой нового образа. Предупреждение об orphan-контейнере не является
+причиной ошибки Python; перед удалением такого контейнера проверьте, не выполняет
+ли он ещё полезную работу.
