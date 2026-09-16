@@ -52,7 +52,7 @@ def test_bound_query_commit_and_jdbc():
     assert result.external_ref == "123"
     assert result.external_meta["oracle_recorded"] is True
     driver.connect.assert_called_once_with(
-        user="test", password="secret", dsn="//db.example:1523/service", tcp_connect_timeout=10,
+        user="test", password="secret", dsn="//db.example:1523/service", tcp_connect_timeout=30,
     )
     sql, params = cursor.execute.call_args.args
     assert sql == SQL
@@ -104,3 +104,70 @@ def test_cursor_id_column():
     cursor.description = [("ERROR",)]
     with pytest.raises(RuntimeError, match="column is missing"):
         handler._cursor_ref(cursor)
+
+
+def test_confirmation_logs_and_budget(caplog):
+    driver, connection, cursor = driver_mock()
+    with caplog.at_level("INFO"), patch(
+        "alarm_manager_server.plugins.oracle.import_module", return_value=driver
+    ), patch("alarm_manager_server.plugins.oracle.monotonic", side_effect=[0, 0, 0, 12, 15, 16]):
+        OracleTicketHandler(config()).on_ticket_event(context())
+    assert connection.call_timeout == 15000
+    assert "Oracle sending ticket=T-1" in caplog.text
+    assert "Oracle response received ticket=T-1" in caplog.text
+    assert "Oracle confirmed ticket=T-1" in caplog.text
+    assert "secret" not in caplog.text
+
+
+def test_deadline_expired_no_commit(caplog):
+    driver, connection, cursor = driver_mock()
+    with patch("alarm_manager_server.plugins.oracle.import_module", return_value=driver), patch(
+        "alarm_manager_server.plugins.oracle.monotonic", side_effect=[0, 0, 0, 31, 31]
+    ):
+        with pytest.raises(TimeoutError):
+            OracleTicketHandler(config()).on_ticket_event(context())
+    connection.commit.assert_not_called()
+    connection.rollback.assert_called_once()
+    assert "confirmation missing ticket=T-1 stage=fetch reason=timeout" in caplog.text
+    assert "Oracle confirmed" not in caplog.text
+
+
+def test_commit_failure_and_rollback_failure_preserve_error(caplog):
+    driver, connection, cursor = driver_mock()
+    connection.commit.side_effect = RuntimeError("commit lost")
+    connection.rollback.side_effect = RuntimeError("rollback lost")
+    with patch("alarm_manager_server.plugins.oracle.import_module", return_value=driver):
+        with pytest.raises(RuntimeError, match="commit lost"):
+            OracleTicketHandler(config()).on_ticket_event(context())
+    assert "stage=commit" in caplog.text
+    assert "Oracle confirmed" not in caplog.text
+
+
+@pytest.mark.parametrize("empty", [None, (None,), ("",)])
+def test_missing_confirmation_logged(empty, caplog):
+    driver, connection, cursor = driver_mock()
+    cursor.fetchone.return_value = empty
+    with patch("alarm_manager_server.plugins.oracle.import_module", return_value=driver):
+        with pytest.raises(RuntimeError):
+            OracleTicketHandler(config()).on_ticket_event(context())
+    assert "Oracle confirmation missing ticket=T-1" in caplog.text
+    connection.commit.assert_not_called()
+
+
+def test_outcome_comments_success_and_failure():
+    driver, connection, cursor = driver_mock()
+    handler = OracleTicketHandler(config(oracle_comment_module_name="Модуль SD"))
+    ctx = context()
+    ctx.ticket["snapshot"] = {"member_ids": ["i1"]}
+    with patch("alarm_manager_server.plugins.oracle.import_module", return_value=driver):
+        handler.on_ticket_event(ctx)
+        cursor.execute.side_effect = TimeoutError("private diagnostic")
+        with pytest.raises(TimeoutError):
+            handler.on_ticket_event(ctx)
+    comments = ctx.ticket["external_meta"]["oracle_comments"]
+    assert len(comments) == 2
+    assert "[Модуль SD]" in comments[0]["text"]
+    assert "успешно" in comments[0]["text"]
+    assert "истекло время ожидания" in comments[1]["text"]
+    assert "private diagnostic" not in comments[1]["text"]
+    assert comments[1]["pending_incident_ids"] == ["i1"]

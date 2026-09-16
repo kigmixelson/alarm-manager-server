@@ -818,5 +818,5 @@ REF CURSOR. Для REF CURSOR задайте `ORACLE_RESULT_ID_COLUMN` — им�
 exactly-once при сбое между commit Oracle и сохранением локального файла.
 Автоматического повтора после ошибки без нового события в текущем worker нет.
 
-Таймаут соединения: `ORACLE_CONNECT_TIMEOUT_SEC=10`, отдельного обращения к БД:
+Таймаут соединения: `ORACLE_CONNECT_TIMEOUT_SEC=30`, ожидания результата и commit после подключения:
 `ORACLE_CALL_TIMEOUT_MS=30000`.

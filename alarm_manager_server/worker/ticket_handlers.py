@@ -224,6 +224,8 @@ def dispatch_ticket_handlers(
             try:
                 result = handler.on_ticket_event(ctx)
             except Exception:
+                # A failed handler may have queued an incident status comment.
+                dirty = True
                 logger.exception("ticket handler %s failed for %s", name, event.ticket_id)
                 continue
             if result is not None:

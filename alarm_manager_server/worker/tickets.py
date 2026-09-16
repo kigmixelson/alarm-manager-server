@@ -157,6 +157,9 @@ class TicketStore:
         ticket = (self._data.get("tickets") or {}).get(ticket_id)
         return ticket if isinstance(ticket, dict) else None
 
+    def all_tickets(self) -> list[dict[str, Any]]:
+        return list(self._data["tickets"].values())
+
     def open_tickets(self) -> list[dict[str, Any]]:
         tickets = self._data.get("tickets") or {}
         return [t for t in tickets.values() if t.get("status") == "open"]

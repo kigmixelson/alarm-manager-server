@@ -142,6 +142,8 @@ class Settings(BaseSettings):
     hpsm_closure_code: str = ""
 
     # Oracle ticket function (credentials are never included in repr).
+    oracle_comment_module_name: str = "Alarm Manager"
+    oracle_saymon_comment_enabled: bool = True
     oracle_dsn: str = ""
     oracle_user: str = ""
     oracle_password: SecretStr = SecretStr("")
@@ -158,7 +160,7 @@ class Settings(BaseSettings):
     oracle_executed_work: str = ""
     oracle_location: str = ""
     oracle_result_id_column: str = ""
-    oracle_connect_timeout_sec: float = Field(default=10, gt=0)
+    oracle_connect_timeout_sec: float = Field(default=30, gt=0)
     oracle_call_timeout_ms: int = Field(default=30000, gt=0)
 
     @property

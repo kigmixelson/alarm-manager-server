@@ -83,6 +83,11 @@ async def annotate_saymon_incidents_on_registration(
             if not isinstance(refs, dict) or not refs:
                 continue
 
+            # Oracle has separate outcome comments, including failures and no-ID results.
+            refs = {k: v for k, v in refs.items() if k != "oracle" or not meta.get("oracle_comments")}
+            if not refs:
+                continue
+
             commented: dict[str, Any] = meta.setdefault("saymon_sd_comments", {})
             if not isinstance(commented, dict):
                 commented = {}
@@ -121,3 +126,36 @@ async def annotate_saymon_incidents_on_registration(
 
     if dirty:
         store.save()
+
+
+async def flush_oracle_comments(store: TicketStore, cfg: Settings) -> None:
+    """Retry pending status comments independently of new ticket events."""
+    if not cfg.oracle_saymon_comment_enabled:
+        return
+    pending = [
+        (ticket, item)
+        for ticket in store.all_tickets()
+        for item in (ticket.get("external_meta") or {}).get("oracle_comments", [])
+        if item.get("pending_incident_ids")
+    ]
+    if not pending:
+        return
+    if not cfg.saymon_login or not cfg.saymon_password.get_secret_value():
+        logger.warning("Oracle status comments pending: SAYMON credentials missing")
+        return
+    client = SaymonClient.from_settings(cfg)
+    try:
+        for ticket, item in pending:
+            for incident_id in list(item["pending_incident_ids"]):
+                try:
+                    await client.add_incident_comment(incident_id, item["text"])
+                except Exception:
+                    logger.exception("Oracle status comment failed ticket=%s incident=%s; will retry",
+                                     ticket.get("ticket_id"), incident_id)
+                    continue
+                item["pending_incident_ids"].remove(incident_id)
+                store.save()
+                logger.info("Oracle status comment delivered ticket=%s incident=%s",
+                            ticket.get("ticket_id"), incident_id)
+    finally:
+        await client.aclose()

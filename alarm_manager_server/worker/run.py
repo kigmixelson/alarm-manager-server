@@ -11,7 +11,9 @@ from datetime import UTC, datetime
 from alarm_manager_server.config import settings
 from alarm_manager_server.worker.client import ProcessApiClient
 from alarm_manager_server.worker.formatter import build_groups, build_tracked_groups, format_groups
-from alarm_manager_server.worker.incident_comments import annotate_saymon_incidents_on_registration
+from alarm_manager_server.worker.incident_comments import (
+    annotate_saymon_incidents_on_registration, flush_oracle_comments,
+)
 from alarm_manager_server.worker.ticket_handlers import (
     dispatch_ticket_handlers,
     resolve_ticket_handlers,
@@ -71,6 +73,7 @@ async def run_once(
                 incidents_by_id,
                 settings,
             )
+        await flush_oracle_comments(store, settings)
         groups = [g.display for g in visible_tracked]
         text = format_ticket_events(events)
         incident_rows = sum(len(group.rows) for group in groups)

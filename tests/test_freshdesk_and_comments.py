@@ -144,3 +144,28 @@ async def test_annotate_saymon_skips_history(tmp_path):
     commented = store._data["tickets"]["T-000001"]["external_meta"]["saymon_sd_comments"]
     assert "active-1" in commented
     assert "hist-1" not in commented
+
+
+async def test_oracle_comment_retry_and_persistence(tmp_path):
+    from alarm_manager_server.worker.incident_comments import flush_oracle_comments
+
+    path = tmp_path / "tickets.json"
+    store = TicketStore(path)
+    store._data["tickets"]["T-1"] = {
+        "ticket_id": "T-1",
+        "external_meta": {"oracle_comments": [
+            {"text": "[Module] Подтверждено", "pending_incident_ids": ["i1", "i2"]},
+        ]},
+    }
+    cfg = Settings(_env_file=None, saymon_login="bot", saymon_password="secret")
+    client = AsyncMock()
+    client.add_incident_comment.side_effect = [None, RuntimeError("unavailable")]
+    with patch("alarm_manager_server.worker.incident_comments.SaymonClient.from_settings", return_value=client):
+        await flush_oracle_comments(store, cfg)
+        reloaded = TicketStore(path)
+        client.add_incident_comment.reset_mock(side_effect=True)
+        await flush_oracle_comments(reloaded, cfg)
+        client.add_incident_comment.assert_awaited_once_with("i2", "[Module] Подтверждено")
+        client.add_incident_comment.reset_mock()
+        await flush_oracle_comments(reloaded, cfg)
+        client.add_incident_comment.assert_not_awaited()
