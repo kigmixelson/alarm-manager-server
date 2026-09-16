@@ -128,7 +128,9 @@ async def annotate_saymon_incidents_on_registration(
         store.save()
 
 
-async def flush_oracle_comments(store: TicketStore, cfg: Settings) -> None:
+async def flush_oracle_comments(
+    store: TicketStore, cfg: Settings, incidents_by_id: dict[str, Incident] | None = None,
+) -> None:
     """Retry pending status comments independently of new ticket events."""
     if not cfg.oracle_saymon_comment_enabled:
         return
@@ -147,6 +149,14 @@ async def flush_oracle_comments(store: TicketStore, cfg: Settings) -> None:
     try:
         for ticket, item in pending:
             for incident_id in list(item["pending_incident_ids"]):
+                incident = (incidents_by_id or {}).get(incident_id)
+                if incident is not None and incident.is_history:
+                    item.setdefault("skipped_incidents", {})[incident_id] = "history"
+                    item["pending_incident_ids"].remove(incident_id)
+                    store.save()
+                    logger.warning("Oracle status comment skipped ticket=%s incident=%s reason=history",
+                                   ticket.get("ticket_id"), incident_id)
+                    continue
                 try:
                     await client.add_incident_comment(incident_id, item["text"])
                 except Exception:

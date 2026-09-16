@@ -9,8 +9,8 @@
 - Доступ от контейнера worker к Oracle `cist.garadj.com:1523`, от API и worker к SAYMON,
   от worker к API на 4800. Интернет для работы не нужен.
 - Версия Oracle и совместимость учётной записи с python-oracledb Thin.
-  Текущий коннектор не включает Thick-режим. Для Oracle 11g или требований к
-  Oracle Client необходима отдельная адаптация, одного копирования библиотек недостаточно.
+  Для старых verifier используйте Thick-поставку из раздела 12. Обычный образ
+  не содержит Oracle Client.
 - С DBA: право выполнения `REPAIR.REP_MONIT_SYSTEM_CURS`, типы её аргументов,
   формат результата, коды ошибок и допустимость записи через `SELECT ... FROM dual`.
 
@@ -324,10 +324,11 @@ worker, без повторного вызова Oracle. Успешно дост
 не отправляются. При потере ответа SAYMON или сбое до сохранения локальной отметки
 возможен дубль: API не предоставляет здесь ключ идемпотентности.
 
-При `ORACLE_EVENT=closed` отправка комментария также выполняется. Если версия SAYMON
-не разрешает комментарии к архивным авариям, в логах будет ошибка доставки, а
-комментарий останется в очереди. Поддержку архивных аварий нужно проверить при
-приёмке интеграции.
+Заведомо архивные аварии (`is_history=true` в текущем ответе SAYMON) пропускаются:
+API комментариев рассчитан на активные аварии. Причина сохраняется в
+`skipped_incidents`, лог — `Oracle status comment skipped ... reason=history`.
+Это относится и к `ORACLE_EVENT=closed`. Если архивность неизвестна, попытка
+отправки выполняется; ошибку 500 необходимо диагностировать по логам SAYMON.
 
 Логи доставки: `Oracle status comment delivered`, ошибки: `Oracle status comment failed`.
 
@@ -353,3 +354,88 @@ docker compose -f compose.yml logs -f --tail=100 server worker
 Обычный `restart` не подхватывает изменённые переменные окружения контейнера.
 Для systemd после изменения `.env`: `systemctl restart alarm-manager-server alarm-manager-worker`.
 Проверяйте успешный ответ `/process` и проход worker: `/health` не проверяет соединение с SAYMON.
+
+
+## 11. Oracle DPY-3015: несовместимый формат пароля
+
+`password verifier type 0x939 is not supported ... thin mode` означает, что
+учётная запись имеет старый verifier 10G. Это не таймаут и не проблема SSL.
+Соединение не установлено, функция записи заявки для такой попытки не вызывалась.
+
+DBA может проверить формат (в целевой БД/PDB):
+
+```sql
+SELECT username, password_versions
+FROM dba_users
+WHERE username = 'SAYMON';
+```
+
+Для текущей Thin-поставки DBA должен обеспечить verifier 11G/12C, проверив
+настройки аутентификации и пересоздав verifier согласованной сменой пароля.
+Новый пароль нужно обновить в `.env` и пересоздать контейнеры. Не изменяйте
+глобальную политику аутентификации БД без DBA.
+
+Альтернатива — отдельная поставка с Oracle Instant Client и инициализацией
+Thick-режима. Для этого используйте Thick-образ и настройку из раздела 12.
+[Описание DPY-3015 от Oracle](https://python-oracledb.readthedocs.io/en/latest/user_guide/troubleshooting.html#dpy-3015).
+
+После исправления проверяйте новую согласованную тестовую аварию. Старые неудачные
+CREATE автоматически не повторяются. Не удаляйте tickets.json для повторного запуска.
+
+## 12. DPY-3015 без изменения БД: поставка Oracle Thick
+
+Для существующей учётной записи со старым verifier используйте Thick-образ.
+Поддерживаемая здесь платформа — **Linux x86_64 (amd64)**. В образ включается
+Oracle Instant Client **Basic 19.32**, libaio и файлы лицензии из архива Oracle.
+Basic выбран для поддержки в том числе русских кодировок. Архив скачивается с
+сайта Oracle на сборочной машине и проверяется по фиксированной SHA-256.
+В закрытом контуре скачивание библиотек не требуется.
+
+На машине с интернетом и Docker, в обновлённых исходниках:
+
+```bash
+bash scripts/build-offline-bundle.sh linux/amd64 2026.09.16-thick-1 thick
+```
+
+Перенесите комплект, проверьте SHA256SUMS, загрузите `image.tar`. Сохраните
+существующие `.env` и тома с tickets.json. В рабочем `.env` измените:
+
+```env
+ALARM_MANAGER_IMAGE=alarm-manager-server:2026.09.16-thick-1
+ORACLE_MODE=thick
+```
+
+DSN, логин, пароль и ID остаются прежними. Для Linux библиотека регистрируется
+через `ldconfig`; `lib_dir` в Python не задаётся. Thin остаётся режимом по умолчанию
+для обычного образа. Режим фиксируется на процесс, поэтому требуется пересоздание
+контейнеров, а не изменение настройки работающего соединения.
+
+Перед возобновлением обработки проверьте подключение без создания заявки:
+
+```bash
+docker compose -f compose.yml stop worker
+docker compose -f compose.yml run --rm --no-deps --pull never worker \
+  python -m alarm_manager_server.plugins.oracle_check
+```
+
+Ожидается `Oracle connection OK; mode=thick; database=...`. Проверка выполняет
+только `SELECT 1 FROM dual`, не создаёт тикетов и не меняет локальное состояние.
+После успешной проверки:
+
+```bash
+docker compose -f compose.yml up -d --no-build --pull never --force-recreate server worker
+docker compose -f compose.yml logs -f --tail=100 worker
+```
+
+Для проверки записи нужна новая согласованная тестовая авария: старые неудачные
+CREATE автоматически не повторяются. Не удаляйте tickets.json. `Oracle connection
+OK` проверяет аутентификацию, а `Oracle confirmed` — вызов функции и commit.
+
+`DPI-1047` означает, что Oracle Client не загрузился: проверьте, что загружен
+именно Thick-образ и совпадает архитектура. Если остаётся `DPY-3015`, проверьте
+`ORACLE_MODE` в рабочем `.env` и пересоздание контейнера. Другие ошибки Oracle
+потребуют отдельной диагностики: Thick решает несовместимость verifier, но не
+предоставляет отсутствующие права и не исправляет саму хранимую функцию.
+
+Источники: [инициализация Thick](https://python-oracledb.readthedocs.io/en/latest/user_guide/initialization.html),
+[Oracle Instant Client](https://www.oracle.com/database/technologies/instant-client/linux-x86-64-downloads.html).

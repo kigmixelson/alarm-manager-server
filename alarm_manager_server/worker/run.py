@@ -73,7 +73,7 @@ async def run_once(
                 incidents_by_id,
                 settings,
             )
-        await flush_oracle_comments(store, settings)
+        await flush_oracle_comments(store, settings, incidents_by_id)
         groups = [g.display for g in visible_tracked]
         text = format_ticket_events(events)
         incident_rows = sum(len(group.rows) for group in groups)

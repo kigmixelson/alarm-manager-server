@@ -169,3 +169,20 @@ async def test_oracle_comment_retry_and_persistence(tmp_path):
         client.add_incident_comment.reset_mock()
         await flush_oracle_comments(reloaded, cfg)
         client.add_incident_comment.assert_not_awaited()
+
+
+async def test_oracle_comments_skip_known_history(tmp_path):
+    from alarm_manager_server.worker.incident_comments import flush_oracle_comments
+
+    store = TicketStore(tmp_path / "tickets.json")
+    item = {"text": "Status", "pending_incident_ids": ["archived", "active"]}
+    store._data["tickets"]["T-1"] = {
+        "ticket_id": "T-1", "external_meta": {"oracle_comments": [item]},
+    }
+    cfg = Settings(_env_file=None, saymon_login="bot", saymon_password="secret")
+    client = AsyncMock()
+    with patch("alarm_manager_server.worker.incident_comments.SaymonClient.from_settings", return_value=client):
+        await flush_oracle_comments(store, cfg, {"archived": MagicMock(is_history=True)})
+    client.add_incident_comment.assert_awaited_once_with("active", "Status")
+    assert item["skipped_incidents"] == {"archived": "history"}
+    assert item["pending_incident_ids"] == []

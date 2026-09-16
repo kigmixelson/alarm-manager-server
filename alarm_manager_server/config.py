@@ -145,6 +145,7 @@ class Settings(BaseSettings):
     # Oracle ticket function (credentials are never included in repr).
     oracle_comment_module_name: str = "Alarm Manager"
     oracle_saymon_comment_enabled: bool = True
+    oracle_mode: Literal["thin", "thick"] = "thin"
     oracle_dsn: str = ""
     oracle_user: str = ""
     oracle_password: SecretStr = SecretStr("")

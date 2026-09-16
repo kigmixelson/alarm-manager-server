@@ -30,6 +30,30 @@ SQL = """SELECT REPAIR.REP_MONIT_SYSTEM_CURS(
 ) FROM dual"""
 
 
+def oracle_driver(cfg: Settings):
+    """Initialize OCI before connecting; mode remains fixed for this process."""
+    driver = import_module("oracledb")
+    if cfg.oracle_mode == "thick":
+        driver.init_oracle_client()
+        logger.info("Oracle driver mode=thick client_version=%s", driver.clientversion())
+    return driver
+
+
+def oracle_connect(driver, cfg: Settings):
+    dsn = cfg.oracle_dsn.strip().removeprefix("jdbc:oracle:thin:@")
+    if cfg.oracle_mode == "thick":
+        # OCI 19 needs timeout in the descriptor, not only a Python keyword.
+        params = driver.ConnectParams()
+        params.parse_connect_string(dsn)
+        params.set(tcp_connect_timeout=cfg.oracle_connect_timeout_sec,
+                   retry_count=0)
+        dsn = params.get_connect_string()
+    return driver.connect(
+        user=cfg.oracle_user, password=cfg.oracle_password.get_secret_value(),
+        dsn=dsn, tcp_connect_timeout=cfg.oracle_connect_timeout_sec,
+    )
+
+
 class OracleTicketHandler(BaseTicketHandler):
     def __init__(self, cfg: Settings) -> None:
         self.cfg = cfg
@@ -61,6 +85,12 @@ class OracleTicketHandler(BaseTicketHandler):
                 "DPY-4024", "DPI-1067", "ORA-12170",
             }
             reason = "истекло время ожидания" if timeout else "ошибка отправки или некорректный ответ"
+            if getattr(error, "full_code", None) == "DPY-3015":
+                reason = ("подключение отклонено (DPY-3015): формат пароля учётной записи "
+                          "несовместим с Oracle Thin; требуется обращение к DBA")
+                logger.error("Oracle DPY-3015 ticket=%s: DBA must regenerate an 11G/12C password "
+                             "verifier or deploy Oracle Client with Thick mode; function was not called",
+                             ctx.event.ticket_id)
             self._queue_comment(ctx, (
                 f"Отправка информации в Oracle ServiceDesk не подтверждена: {reason}. "
                 "Перед повторной отправкой требуется сверка с Oracle."
@@ -109,17 +139,13 @@ class OracleTicketHandler(BaseTicketHandler):
             "p_id_def": cfg.oracle_id_def,
             "p_id_monit": cfg.oracle_id_monit,
         }
-        dsn = cfg.oracle_dsn.strip().removeprefix("jdbc:oracle:thin:@")
-        driver = import_module("oracledb")
+        driver = oracle_driver(cfg)
         started = monotonic()
         stage = "connect"
         logger.info("Oracle connecting ticket=%s event=%s timeout_sec=%s",
                     ctx.event.ticket_id, ctx.event.action, cfg.oracle_connect_timeout_sec)
         try:
-            with driver.connect(
-                user=cfg.oracle_user, password=cfg.oracle_password.get_secret_value(),
-                dsn=dsn, tcp_connect_timeout=cfg.oracle_connect_timeout_sec,
-            ) as connection:
+            with oracle_connect(driver, cfg) as connection:
                 deadline = monotonic() + cfg.oracle_call_timeout_ms / 1000
 
                 def remaining_timeout():

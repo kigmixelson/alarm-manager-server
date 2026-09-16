@@ -171,3 +171,28 @@ def test_outcome_comments_success_and_failure():
     assert "истекло время ожидания" in comments[1]["text"]
     assert "private diagnostic" not in comments[1]["text"]
     assert comments[1]["pending_incident_ids"] == ["i1"]
+
+
+def test_thick_initialization_and_descriptor():
+    from alarm_manager_server.plugins.oracle import oracle_driver, oracle_connect
+
+    cfg = config(oracle_mode="thick")
+    driver, _, _ = driver_mock()
+    params = driver.ConnectParams.return_value
+    params.get_connect_string.return_value = "(DESCRIPTION=test)"
+    with patch("alarm_manager_server.plugins.oracle.import_module", return_value=driver):
+        assert oracle_driver(cfg) is driver
+    driver.init_oracle_client.assert_called_once_with()
+    oracle_connect(driver, cfg)
+    params.parse_connect_string.assert_called_once_with("//db.example:1523/service")
+    params.set.assert_called_once_with(tcp_connect_timeout=30, retry_count=0)
+    assert driver.connect.call_args.kwargs["dsn"] == "(DESCRIPTION=test)"
+
+
+def test_thin_does_not_load_oci():
+    from alarm_manager_server.plugins.oracle import oracle_driver
+
+    driver, _, _ = driver_mock()
+    with patch("alarm_manager_server.plugins.oracle.import_module", return_value=driver):
+        oracle_driver(config())
+    driver.init_oracle_client.assert_not_called()

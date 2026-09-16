@@ -821,3 +821,5 @@ exactly-once при сбое между commit Oracle и сохранением 
 
 Таймаут соединения: `ORACLE_CONNECT_TIMEOUT_SEC=30`, ожидания результата и commit после подключения:
 `ORACLE_CALL_TIMEOUT_MS=30000`.
+
+Oracle со старым форматом пароля (`DPY-3015`): [Thick-поставка без изменения БД](docs/offline-install.md#12-dpy-3015-без-изменения-бд-поставка-oracle-thick). Сборка: `bash scripts/build-offline-bundle.sh linux/amd64 <тег> thick`, настройка: `ORACLE_MODE=thick`.
