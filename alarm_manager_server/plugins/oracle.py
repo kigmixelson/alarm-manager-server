@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 from uuid import uuid4
 
 from alarm_manager_server.config import Settings
+from alarm_manager_server.plugins.oracle_diagnostics import diagnose_connection
 from alarm_manager_server.worker.ticket_handlers import (
     BaseTicketHandler, HandlerResult, TicketHandlerContext,
 )
@@ -139,12 +140,14 @@ class OracleTicketHandler(BaseTicketHandler):
             "p_id_def": cfg.oracle_id_def,
             "p_id_monit": cfg.oracle_id_monit,
         }
-        driver = oracle_driver(cfg)
+        driver = None
         started = monotonic()
-        stage = "connect"
+        stage = "initialize"
         logger.info("Oracle connecting ticket=%s event=%s timeout_sec=%s",
                     ctx.event.ticket_id, ctx.event.action, cfg.oracle_connect_timeout_sec)
         try:
+            driver = oracle_driver(cfg)
+            stage = "connect"
             with oracle_connect(driver, cfg) as connection:
                 deadline = monotonic() + cfg.oracle_call_timeout_ms / 1000
 
@@ -207,6 +210,8 @@ class OracleTicketHandler(BaseTicketHandler):
                 ctx.event.ticket_id, stage, "timeout" if timed_out else "error_or_invalid_response",
                 type(exc).__name__, code or "unavailable", monotonic() - started,
             )
+            if stage in {"initialize", "connect"}:
+                diagnose_connection(driver, cfg, exc, ctx.event.ticket_id)
             raise
         return HandlerResult(
             external_ref=ref,
