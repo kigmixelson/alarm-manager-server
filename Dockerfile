@@ -11,6 +11,9 @@ COPY alarm_manager_server ./alarm_manager_server
 
 RUN pip install --upgrade pip && pip install .
 
+# Check the installed package, not the source tree in /app.
+RUN cd /tmp && python -c "import alarm_manager_server.api.app; import alarm_manager_server.worker.run; import alarm_manager_server.plugins.registry; import alarm_manager_server.plugins.oracle_diagnostics; import alarm_manager_server.plugins.oracle_check"
+
 EXPOSE 4800
 
 CMD ["alarm-manager-server"]

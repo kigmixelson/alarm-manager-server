@@ -36,8 +36,8 @@ if [[ "$mode" == thick ]]; then
 fi
 # Verify dependencies and entry points without access to any network.
 docker run --rm --network none --platform "$platform" "$image" python -m pip check
-docker run --rm --network none --platform "$platform" "$image" python -c \
-  'import oracledb; import alarm_manager_server.api.app; import alarm_manager_server.worker.run; from zoneinfo import ZoneInfo; ZoneInfo("Europe/Moscow"); print("Offline imports OK")'
+docker run --rm --network none --platform "$platform" --workdir /tmp "$image" python -c \
+  'import oracledb; import alarm_manager_server.plugins.registry; import alarm_manager_server.plugins.oracle_diagnostics; import alarm_manager_server.plugins.oracle_check; import alarm_manager_server.api.app; import alarm_manager_server.worker.run; from zoneinfo import ZoneInfo; ZoneInfo("Europe/Moscow"); print("Offline imports OK")'
 docker run --rm --network none --platform "$platform" "$image" alarm-manager-worker --help >/dev/null
 docker run --rm --network none --platform "$platform" "$image" python -m pip freeze > "$out/python-packages.txt"
 docker image inspect "$image" > "$out/image-inspect.json"
