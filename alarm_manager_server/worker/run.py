@@ -5,6 +5,8 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+
+from alarm_manager_server.logging_utils import log_error
 import sys
 from datetime import UTC, datetime
 
@@ -135,7 +137,7 @@ async def run_loop(
                 ticket_handler_specs=ticket_handler_specs,
             )
         except Exception:
-            logger.exception("processing failed")
+            log_error(logger, "processing failed")
         await asyncio.sleep(interval_sec)
 
 
@@ -208,6 +210,10 @@ def main(argv: list[str] | None = None) -> None:
         format="%(asctime)s %(levelname)s %(message)s",
     )
 
+    # Routine HTTP request lines obscure operational outcomes at INFO.
+    logging.getLogger("httpx").setLevel(logging.DEBUG if args.verbose else logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.DEBUG if args.verbose else logging.WARNING)
+
     interval = 0.0 if args.once else args.interval
     if args.responsible and args.no_macros:
         parser.error("--responsible cannot be used together with --no-macros")
@@ -237,7 +243,7 @@ def main(argv: list[str] | None = None) -> None:
         except KeyboardInterrupt:
             sys.exit(130)
         except Exception:
-            logger.exception("processing failed")
+            log_error(logger, "processing failed")
             sys.exit(1)
         return
 

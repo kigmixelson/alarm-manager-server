@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+
+from alarm_manager_server.logging_utils import log_error
 from typing import Any
 
 from alarm_manager_server.config import Settings, settings
@@ -116,7 +118,7 @@ async def annotate_saymon_incidents_on_registration(
                         refs,
                     )
                 except Exception:
-                    logger.exception(
+                    log_error(logger,
                         "failed SAYMON comment on incident %s for %s",
                         inc_id,
                         event.ticket_id,
@@ -160,7 +162,7 @@ async def flush_oracle_comments(
                 try:
                     await client.add_incident_comment(incident_id, item["text"])
                 except Exception:
-                    logger.exception("Oracle status comment failed ticket=%s incident=%s; will retry",
+                    log_error(logger, "Oracle status comment failed ticket=%s incident=%s; will retry",
                                      ticket.get("ticket_id"), incident_id)
                     continue
                 item["pending_incident_ids"].remove(incident_id)

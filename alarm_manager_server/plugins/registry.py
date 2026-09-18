@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import logging
 
+from alarm_manager_server.logging_utils import log_error
+
 from alarm_manager_server.config import Settings, settings
 from alarm_manager_server.plugins.bitrix24 import Bitrix24TicketHandler
 from alarm_manager_server.plugins.elma import ElmaTicketHandler
@@ -41,7 +43,7 @@ def discover_ticket_handlers(cfg: Settings | None = None) -> list[TicketHandler]
         try:
             handler = factory(cfg)
         except Exception:
-            logger.exception("failed to init %s ticket plugin", name)
+            log_error(logger, "failed to init %s ticket plugin", name)
             continue
         if handler is not None:
             handlers.append(handler)

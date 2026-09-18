@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import importlib
 import logging
+
+from alarm_manager_server.logging_utils import log_error
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
@@ -139,7 +141,7 @@ def load_ticket_handlers(specs: list[str]) -> list[TicketHandler]:
             handlers.append(_import_from_spec(spec))
             logger.info("loaded ticket handler %s", spec.strip())
         except Exception:
-            logger.exception("failed to load ticket handler %s", spec)
+            log_error(logger, "failed to load ticket handler %s", spec)
             raise
     return handlers
 
@@ -226,7 +228,7 @@ def dispatch_ticket_handlers(
             except Exception:
                 # A failed handler may have queued an incident status comment.
                 dirty = True
-                logger.exception("ticket handler %s failed for %s", name, event.ticket_id)
+                log_error(logger, "ticket handler %s failed for %s", name, event.ticket_id)
                 continue
             if result is not None:
                 apply_handler_results(ticket, result)
