@@ -142,6 +142,17 @@ class Settings(BaseSettings):
     hpsm_close_status: str = "Closed"
     hpsm_closure_code: str = ""
 
+    # --- Zammad plugin ---
+    zammad_base_url: str = ""
+    zammad_api_token: SecretStr = SecretStr("")
+    zammad_group: str = ""
+    zammad_group_id: int = 0
+    zammad_customer: str = ""
+    zammad_priority: str = "2 normal"
+    zammad_state_open: str = "new"
+    zammad_state_closed: str = "closed"
+    zammad_article_internal: bool = True
+
     # Oracle ticket function (credentials are never included in repr).
     oracle_comment_module_name: str = "Alarm Manager"
     oracle_saymon_comment_enabled: bool = True
@@ -259,6 +270,16 @@ class Settings(BaseSettings):
             and self.hpsm_user.strip()
             and self.hpsm_password.get_secret_value().strip()
         )
+
+    @property
+    def zammad_enabled(self) -> bool:
+        if not (
+            self.zammad_base_url.strip()
+            and self.zammad_api_token.get_secret_value().strip()
+            and self.zammad_customer.strip()
+        ):
+            return False
+        return bool(self.zammad_group.strip() or self.zammad_group_id > 0)
 
     @property
     def api_url(self) -> str:

@@ -22,7 +22,7 @@
 - **Ответственные** — макросы вида `{{parent[class.id=...].properties[...]}}`
 - **Тикеты групп** (`--tickets`) — между запусками worker: создать / обновить / закрыть «тикет» на каждую группу; состояние в `TICKETS_FILE` (см. [ниже](#тикеты-между-запусками-worker---tickets))
 - **Handlers внешней SD** (`TICKET_HANDLERS` / `--ticket-handler`) — регистрация заявок из Python
-- **Плагины** Jira, Redmine, Freshdesk, ServiceNow, SimpleOne, Naumen, ELMA365, Битрикс24, HP Service Manager — автоматически из `.env` (см. [ниже](#плагины-внешних-service-desk))
+- **Плагины** Jira, Redmine, Freshdesk, ServiceNow, SimpleOne, Naumen, ELMA365, Битрикс24, HP Service Manager, Zammad — автоматически из `.env` (см. [ниже](#плагины-внешних-service-desk))
 
 ---
 
@@ -438,6 +438,7 @@ Router-A (Host)
 | **ELMA365** | `ELMA_BASE_URL`, `ELMA_API_TOKEN`, `ELMA_NAMESPACE`, `ELMA_APP_CODE` | CREATE → элемент приложения; UPDATE/CLOSE → сообщение в ленте; CLOSE → `set-status` |
 | **Битрикс24** | `BITRIX24_WEBHOOK_URL`, `BITRIX24_RESPONSIBLE_ID` | CREATE → задача (`tasks.task.add`); UPDATE/CLOSE → комментарий; CLOSE → `tasks.task.complete` |
 | **HP Service Manager** | `HPSM_BASE_URL`, `HPSM_USER`, `HPSM_PASSWORD` | CREATE → incident (`POST /incidents`); UPDATE/CLOSE → `JournalUpdates` (PUT); CLOSE → `Status` |
+| **Zammad** | `ZAMMAD_BASE_URL`, `ZAMMAD_API_TOKEN`, `ZAMMAD_CUSTOMER`, (`ZAMMAD_GROUP` или `ZAMMAD_GROUP_ID`) | CREATE → ticket; UPDATE → article; CLOSE → state + article |
 
 Пример `.env` для Jira Cloud:
 
@@ -549,6 +550,21 @@ HPSM_CLOSURE_CODE=Solved Remotely
 
 Оператору нужна capability **RESTful API**. Базовый URL — REST root (`/SM/9/rest`); список ресурсов: `GET {HPSM_BASE_URL}`. Документация: [Micro Focus REST API](https://docs.microfocus.com/SM/9.61/Hybrid/Content/webservicesguide/rest_syntax.htm).
 
+Пример для Zammad:
+
+```env
+ZAMMAD_BASE_URL=https://zammad.example.com
+ZAMMAD_API_TOKEN=...
+ZAMMAD_GROUP=Users
+ZAMMAD_CUSTOMER=monitoring@example.com
+ZAMMAD_PRIORITY=2 normal
+ZAMMAD_STATE_OPEN=new
+ZAMMAD_STATE_CLOSED=closed
+ZAMMAD_ARTICLE_INTERNAL=true
+```
+
+Токен: профиль пользователя → **Personal Access Token** с правом `ticket.agent`. Вместо имени группы можно указать `ZAMMAD_GROUP_ID`. Документация: [docs.zammad.org](https://docs.zammad.org/en/latest/api/ticket/index.html).
+
 `REDMINE_STATUS_CLOSED_ID=0` — при CLOSE только комментарий. `SERVICENOW_CLOSE_STATE` / `SIMPLEONE_CLOSE_STATE` пустые — при CLOSE только `work_notes`. `NAUMEN_CLOSE_STATE` / `NAUMEN_CLOSE_CODE` пустые — при CLOSE только `resultDescr`. `HPSM_CLOSE_STATUS` пустой — при CLOSE только `JournalUpdates`.
 
 Id сохраняются в `TICKETS_FILE`: `external_ref` (номер заявки, напр. `INC0001234`) и `external_meta.sys_id` для последующих UPDATE/CLOSE.
@@ -562,7 +578,7 @@ Id сохраняются в `TICKETS_FILE`: `external_ref` (номер заяв
 - на worker нужны те же **`SAYMON_LOGIN` / `SAYMON_PASSWORD` / `SAYMON_BASE_URL`**, что и у server (прямой вызов API ЦП)
 - повторный комментарий на тот же инцидент не отправляется (`external_meta.saymon_sd_comments`)
 
-Модули: `plugins/jira.py`, `redmine.py`, `freshdesk.py`, `servicenow.py`, `simpleone.py`, `naumen.py`, `elma.py`, `bitrix24.py`, `hpsm.py`.
+Модули: `plugins/jira.py`, `redmine.py`, `freshdesk.py`, `servicenow.py`, `simpleone.py`, `naumen.py`, `elma.py`, `bitrix24.py`, `hpsm.py`, `zammad.py`.
 
 ### Внешний handler (`TICKET_HANDLERS`)
 
@@ -655,6 +671,7 @@ alarm-manager-worker --responsible --active --tickets \
 | `ELMA_*` | ELMA365 Public API |
 | `BITRIX24_*` | Битрикс24 incoming webhook (задачи) |
 | `HPSM_*` | HP Service Manager REST API (incidents) |
+| `ZAMMAD_*` | Zammad REST API (tickets) |
 | `TICKET_SAYMON_COMMENT_*` | Комментарий в SAYMON после CREATE во внешней SD |
 
 ---
@@ -718,7 +735,7 @@ alarm_manager_server/
 │   └── owner_display.py
 ├── cache/                  # file_cache.py — JSON на диске с TTL
 ├── saymon/                 # client, object_store, auth
-├── plugins/                # Jira, Redmine, Freshdesk, ServiceNow, SimpleOne, Naumen, ELMA, Bitrix24, HPSM
+├── plugins/                # Jira, Redmine, Freshdesk, ServiceNow, SimpleOne, Naumen, ELMA, Bitrix24, HPSM, Zammad
 │   ├── jira.py
 │   ├── redmine.py
 │   ├── freshdesk.py
@@ -728,6 +745,7 @@ alarm_manager_server/
 │   ├── elma.py
 │   ├── bitrix24.py
 │   ├── hpsm.py
+│   ├── zammad.py
 │   └── registry.py
 └── worker/
     ├── run.py              # CLI

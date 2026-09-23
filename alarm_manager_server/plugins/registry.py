@@ -17,6 +17,7 @@ from alarm_manager_server.plugins.oracle import OracleTicketHandler
 from alarm_manager_server.plugins.naumen import NaumenTicketHandler
 from alarm_manager_server.plugins.servicenow import ServiceNowTicketHandler
 from alarm_manager_server.plugins.simpleone import SimpleOneTicketHandler
+from alarm_manager_server.plugins.zammad import ZammadTicketHandler
 from alarm_manager_server.worker.ticket_handlers import TicketHandler
 
 logger = logging.getLogger(__name__)
@@ -32,6 +33,7 @@ _PLUGIN_FACTORIES = (
     ("bitrix24", Bitrix24TicketHandler.from_settings),
     ("oracle", OracleTicketHandler.from_settings),
     ("hpsm", HpServiceManagerTicketHandler.from_settings),
+    ("zammad", ZammadTicketHandler.from_settings),
 )
 
 
