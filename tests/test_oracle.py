@@ -3,7 +3,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from alarm_manager_server.config import Settings
-from alarm_manager_server.plugins.oracle import OracleTicketHandler, SQL
+from alarm_manager_server.plugins.oracle import FUNCTION_NAME, OracleTicketHandler
 from alarm_manager_server.plugins.registry import discover_ticket_handlers
 from alarm_manager_server.worker.ticket_handlers import TicketHandlerContext
 from alarm_manager_server.worker.tickets import TicketEvent
@@ -30,10 +30,13 @@ def context(action="created"):
 
 def driver_mock():
     driver = MagicMock()
-    driver.Cursor = type("ResultCursor", (), {})
+    driver.DB_TYPE_CURSOR = object()
     connection = driver.connect.return_value.__enter__.return_value
     cursor = connection.cursor.return_value.__enter__.return_value
-    cursor.fetchone.return_value = (123,)
+    ref_cursor = MagicMock()
+    ref_cursor.description = [("TICKET_ID",)]
+    ref_cursor.fetchone.return_value = (123,)
+    cursor.callfunc.return_value = ref_cursor
     return driver, connection, cursor
 
 
@@ -45,7 +48,7 @@ def test_discovery_and_secrets():
     assert OracleTicketHandler.from_settings(cfg.model_copy(update={"oracle_id_def": None})) is None
 
 
-def test_bound_query_commit_and_jdbc():
+def test_callfunc_opens_ref_cursor_and_commits():
     driver, connection, cursor = driver_mock()
     with patch("alarm_manager_server.plugins.oracle.import_module", return_value=driver):
         result = OracleTicketHandler(config()).on_ticket_event(context())
@@ -54,13 +57,18 @@ def test_bound_query_commit_and_jdbc():
     driver.connect.assert_called_once_with(
         user="test", password="secret", dsn="//db.example:1523/service", tcp_connect_timeout=30,
     )
-    sql, params = cursor.execute.call_args.args
-    assert sql == SQL
-    assert params["p_b_date"] == "23.07.2026 15:37"
-    assert params["p_e_date"] == "23.07.2026 15:38"
-    assert params["p_name_equip"] == "Объект '1'"
-    assert params["p_name_defect"] == "Дефект 'оборудования'"
-    assert params["p_id_dept"] == 215094
+    cursor.execute.assert_not_called()
+    name, return_type, positional, params = cursor.callfunc.call_args.args
+    assert name == FUNCTION_NAME
+    assert return_type is driver.DB_TYPE_CURSOR
+    assert positional == []
+    assert params["P_B_DATE"] == "23.07.2026 15:37"
+    assert params["P_E_DATE"] == "23.07.2026 15:38"
+    assert params["P_NAME_EQUIP"] == "Объект '1'"
+    assert params["P_NAME_DEFECT"] == "Дефект 'оборудования'"
+    assert params["P_ID_DEPT"] == 215094
+    cursor.callfunc.return_value.fetchone.assert_called_once()
+    cursor.callfunc.return_value.close.assert_called_once()
     connection.commit.assert_called_once()
     connection.rollback.assert_not_called()
     connection.__exit__.assert_called_once()
@@ -70,9 +78,9 @@ def test_bound_query_commit_and_jdbc():
 def test_failure_rolls_back(failure):
     driver, connection, cursor = driver_mock()
     if failure == "execute":
-        cursor.execute.side_effect = RuntimeError("database failure")
+        cursor.callfunc.side_effect = RuntimeError("database failure")
     elif failure == "empty":
-        cursor.fetchone.return_value = (None,)
+        cursor.callfunc.return_value.fetchone.return_value = None
     else:
         connection.commit.side_effect = RuntimeError("commit failure")
     with patch("alarm_manager_server.plugins.oracle.import_module", return_value=driver):
@@ -88,7 +96,8 @@ def test_close_event_and_skip_duplicates():
         assert handler.on_ticket_event(context()) is None
         assert handler.on_ticket_event(context("updated")) is None
         handler.on_ticket_event(context("closed"))
-        assert cursor.execute.call_args.args[1]["p_e_date"] == "23.07.2026 16:00"
+        params = cursor.callfunc.call_args.args[3]
+        assert params["P_E_DATE"] == "23.07.2026 16:00"
         ctx = context("closed")
         ctx.ticket["external_meta"] = {"oracle_recorded": True}
         assert handler.on_ticket_event(ctx) is None
@@ -106,6 +115,17 @@ def test_cursor_id_column():
         handler._cursor_ref(cursor)
 
 
+def test_single_column_cursor_without_configured_name():
+    handler = OracleTicketHandler(config())
+    cursor = MagicMock()
+    cursor.description = [("STATUS",), ("TICKET_ID",)]
+    cursor.fetchone.return_value = ("ok", 456)
+    assert handler._cursor_ref(cursor) is None
+    cursor.description = [("TICKET_ID",)]
+    cursor.fetchone.return_value = (789,)
+    assert handler._cursor_ref(cursor) == "789"
+
+
 def test_confirmation_logs_and_budget(caplog):
     driver, connection, cursor = driver_mock()
     with caplog.at_level("INFO"), patch(
@@ -114,6 +134,7 @@ def test_confirmation_logs_and_budget(caplog):
         OracleTicketHandler(config()).on_ticket_event(context())
     assert connection.call_timeout == 15000
     assert "Oracle sending ticket=T-1" in caplog.text
+    assert "Oracle ref cursor opened ticket=T-1 columns=TICKET_ID" in caplog.text
     assert "Oracle response received ticket=T-1" in caplog.text
     assert "Oracle confirmed ticket=T-1" in caplog.text
     assert "secret" not in caplog.text
@@ -143,10 +164,17 @@ def test_commit_failure_and_rollback_failure_preserve_error(caplog):
     assert "Oracle confirmed" not in caplog.text
 
 
-@pytest.mark.parametrize("empty", [None, (None,), ("",)])
+@pytest.mark.parametrize("empty", [None, "no_rows", "null_id", "blank_id"])
 def test_missing_confirmation_logged(empty, caplog):
     driver, connection, cursor = driver_mock()
-    cursor.fetchone.return_value = empty
+    if empty is None:
+        cursor.callfunc.return_value = None
+    elif empty == "no_rows":
+        cursor.callfunc.return_value.fetchone.return_value = None
+    elif empty == "null_id":
+        cursor.callfunc.return_value.fetchone.return_value = (None,)
+    else:
+        cursor.callfunc.return_value.fetchone.return_value = ("",)
     with patch("alarm_manager_server.plugins.oracle.import_module", return_value=driver):
         with pytest.raises(RuntimeError):
             OracleTicketHandler(config()).on_ticket_event(context())
@@ -161,7 +189,7 @@ def test_outcome_comments_success_and_failure():
     ctx.ticket["snapshot"] = {"member_ids": ["i1"]}
     with patch("alarm_manager_server.plugins.oracle.import_module", return_value=driver):
         handler.on_ticket_event(ctx)
-        cursor.execute.side_effect = TimeoutError("private diagnostic")
+        cursor.callfunc.side_effect = TimeoutError("private diagnostic")
         with pytest.raises(TimeoutError):
             handler.on_ticket_event(ctx)
     comments = ctx.ticket["external_meta"]["oracle_comments"]

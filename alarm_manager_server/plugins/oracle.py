@@ -17,18 +17,21 @@ from alarm_manager_server.worker.ticket_handlers import (
 
 logger = logging.getLogger(__name__)
 
-SQL = """SELECT REPAIR.REP_MONIT_SYSTEM_CURS(
-    P_B_DATE => :p_b_date,
-    P_E_DATE => :p_e_date,
-    P_ID_DEPT => :p_id_dept,
-    P_NAME_EQUIP => :p_name_equip,
-    P_NAME_DEFECT => :p_name_defect,
-    P_EXECUTED_WORK => :p_executed_work,
-    P_ID_BUILD => :p_id_build,
-    P_LOCATION => :p_location,
-    P_ID_DEF => :p_id_def,
-    P_ID_MONIT => :p_id_monit
-) FROM dual"""
+# PL/SQL function that returns SYS_REFCURSOR. SELECT ... FROM dual / executeQuery
+# only yields the cursor handle, not its rows — callfunc opens the cursor.
+FUNCTION_NAME = "REPAIR.REP_MONIT_SYSTEM_CURS"
+KEYWORD_PARAM_NAMES = (
+    ("P_B_DATE", "p_b_date"),
+    ("P_E_DATE", "p_e_date"),
+    ("P_ID_DEPT", "p_id_dept"),
+    ("P_NAME_EQUIP", "p_name_equip"),
+    ("P_NAME_DEFECT", "p_name_defect"),
+    ("P_EXECUTED_WORK", "p_executed_work"),
+    ("P_ID_BUILD", "p_id_build"),
+    ("P_LOCATION", "p_location"),
+    ("P_ID_DEF", "p_id_def"),
+    ("P_ID_MONIT", "p_id_monit"),
+)
 
 
 def oracle_driver(cfg: Settings):
@@ -163,24 +166,35 @@ class OracleTicketHandler(BaseTicketHandler):
                                 ctx.event.ticket_id, ctx.event.action, cfg.oracle_call_timeout_ms)
                     with connection.cursor() as cursor:
                         remaining_timeout()
-                        cursor.execute(SQL, params)
-                        stage = "fetch"
-                        remaining_timeout()
-                        row = cursor.fetchone()
-                        if row is None or row[0] is None:
+                        result = cursor.callfunc(
+                            FUNCTION_NAME,
+                            driver.DB_TYPE_CURSOR,
+                            [],
+                            {plsql: params[key] for plsql, key in KEYWORD_PARAM_NAMES},
+                        )
+                        if result is None:
                             raise RuntimeError("Oracle ticket function returned no result")
-                        result = row[0]
-                        stage = "validate_response"
-                        if isinstance(result, driver.Cursor):
-                            with result:
-                                remaining_timeout()
-                                ref = self._cursor_ref(result)
-                        elif isinstance(result, (str, int)):
-                            ref = str(result).strip()
-                            if not ref:
-                                raise RuntimeError("Oracle ticket function returned an empty result")
-                        else:
-                            raise RuntimeError("Unsupported Oracle ticket function result type")
+                        stage = "fetch"
+                        try:
+                            remaining_timeout()
+                            columns = [
+                                str(entry[0])
+                                for entry in (getattr(result, "description", None) or [])
+                            ]
+                            logger.info("Oracle ref cursor opened ticket=%s columns=%s",
+                                        ctx.event.ticket_id, ",".join(columns) or "unavailable")
+                            stage = "validate_response"
+                            ref = self._cursor_ref(result)
+                        finally:
+                            closer = getattr(result, "close", None)
+                            if callable(closer):
+                                try:
+                                    closer()
+                                except Exception:
+                                    logger.warning(
+                                        "Oracle ref cursor close failed ticket=%s",
+                                        ctx.event.ticket_id,
+                                    )
                     logger.info("Oracle response received ticket=%s external_ref=%s; awaiting commit",
                                 ctx.event.ticket_id, ref or "unavailable")
                     stage = "commit"
@@ -222,11 +236,16 @@ class OracleTicketHandler(BaseTicketHandler):
         row = cursor.fetchone()
         if row is None:
             raise RuntimeError("Oracle ticket function returned an empty cursor")
+        description = getattr(cursor, "description", None)
+        if not description:
+            raise RuntimeError("Oracle ticket function cursor has no description")
+        columns = [entry[0].upper() for entry in description]
         column = self.cfg.oracle_result_id_column.strip().upper()
         if not column:
-            # Do not invent a ticket number from an unknown result schema.
-            return None
-        columns = [entry[0].upper() for entry in cursor.description]
+            if len(columns) != 1:
+                # Do not invent a ticket number from an unknown multi-column schema.
+                return None
+            column = columns[0]
         if column not in columns:
             raise RuntimeError("Configured Oracle ticket ID column is missing")
         value = row[columns.index(column)]
