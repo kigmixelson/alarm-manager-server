@@ -28,7 +28,7 @@
 
 ## Установка в закрытом контуре
 
-[Инструкция для администраторов](docs/offline-install.md): подготовка готового Docker-образа с зависимостями, перенос без интернета, установка из wheel-файлов, настройка Oracle, резервное копирование и обновление. Сборка комплекта: `bash scripts/build-offline-bundle.sh linux/amd64 <тег-версии>`.
+[Инструкция для администраторов](docs/offline-install.md): подготовка готового Docker-образа с зависимостями (для amd64 — с Oracle Instant Client), перенос без интернета, установка из wheel-файлов, настройка Oracle, резервное копирование и обновление. Сборка комплекта: `bash scripts/build-offline-bundle.sh linux/amd64 <тег-версии>`.
 
 ## Требования
 
@@ -844,4 +844,4 @@ exactly-once при сбое между commit Oracle и сохранением 
 Таймаут соединения: `ORACLE_CONNECT_TIMEOUT_SEC=30`, ожидания результата и commit после подключения:
 `ORACLE_CALL_TIMEOUT_MS=30000`.
 
-Oracle со старым форматом пароля (`DPY-3015`): [Thick-поставка без изменения БД](docs/offline-install.md#12-dpy-3015-без-изменения-бд-поставка-oracle-thick). Сборка: `bash scripts/build-offline-bundle.sh linux/amd64 <тег> thick`, настройка: `ORACLE_MODE=thick`.
+Oracle со старым форматом пароля (`DPY-3015`): комплект amd64 по умолчанию — Thick с Instant Client. [Подробности](docs/offline-install.md#12-dpy-3015-без-изменения-бд-поставка-oracle-thick). Образ без клиента: `bash scripts/build-offline-bundle.sh linux/amd64 <тег> thin`.

@@ -4,7 +4,11 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 platform="${1:-linux/amd64}"
 release="${2:-offline}"
-mode="${3:-thin}"
+if [[ "$platform" == linux/amd64 ]]; then
+  mode="${3:-thick}"
+else
+  mode="${3:-thin}"
+fi
 case "$mode" in
   thin) target=thin ;;
   thick) target=oracle-thick ;;
@@ -15,7 +19,7 @@ if [[ "$mode" == thick && "$platform" != linux/amd64 ]]; then
 fi
 case "$platform" in
   linux/amd64|linux/arm64) ;;
-  *) echo 'Usage: bash scripts/build-offline-bundle.sh [linux/amd64|linux/arm64] [release-tag]' >&2; exit 2 ;;
+  *) echo 'Usage: bash scripts/build-offline-bundle.sh [linux/amd64|linux/arm64] [release-tag] [thick|thin]' >&2; exit 2 ;;
 esac
 if [[ ! "$release" =~ ^[a-zA-Z0-9_][a-zA-Z0-9_.-]{0,127}$ ]]; then
   echo 'Invalid Docker release tag' >&2
@@ -29,6 +33,10 @@ if [[ -e "$out" ]]; then
 fi
 command -v docker >/dev/null
 mkdir -p "$out/docs"
+printf 'Building %s bundle (Docker target=%s) for %s\n' "$mode" "$target" "$platform"
+if [[ "$mode" == thin ]]; then
+  printf 'Thin image omits Oracle Instant Client; DPI-1047 if ORACLE_MODE=thick\n' >&2
+fi
 docker build --platform "$platform" --target "$target" --tag "$image" .
 if [[ "$mode" == thick ]]; then
   docker run --rm --network none --platform "$platform" "$image" python -c \
@@ -46,7 +54,15 @@ cp deploy/docker-compose.offline.yml "$out/compose.yml"
 cp .env.example "$out/.env.example"
 printf '\nALARM_MANAGER_IMAGE=%s\n' "$image" >> "$out/.env.example"
 # Set the delivered template to the selected image mode.
-python3 -c 'from pathlib import Path; import sys; p=Path(sys.argv[1]); p.write_text(p.read_text().replace("ORACLE_MODE=thin", "ORACLE_MODE=" + sys.argv[2]))' "$out/.env.example" "$mode"
+python3 -c '
+from pathlib import Path
+import re, sys
+path, mode = Path(sys.argv[1]), sys.argv[2]
+text, n = re.subn(r"(?m)^ORACLE_MODE=.*$", "ORACLE_MODE=" + mode, path.read_text(), count=1)
+if n != 1:
+    raise SystemExit("ORACLE_MODE line not found in .env.example")
+path.write_text(text)
+' "$out/.env.example" "$mode"
 cp docs/*.md "$out/docs/"
 (
   cd "$out"
@@ -59,4 +75,4 @@ cp docs/*.md "$out/docs/"
 printf 'Offline bundle: %s\n' "$out"
 
 tar -czf "${out}.tar.gz" "$out"
-printf 'Bunndle: %s\n' "${out}.tar.gz"
+printf 'Bundle: %s\n' "${out}.tar.gz"

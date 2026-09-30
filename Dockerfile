@@ -19,7 +19,8 @@ EXPOSE 4800
 CMD ["alarm-manager-server"]
 
 
-# Build with --target oracle-thick for legacy Oracle password verifiers.
+# Offline linux/amd64 bundle defaults to this target (Instant Client).
+# docker compose build without --target uses the last stage (`thin`).
 FROM app AS oracle-thick
 ARG TARGETARCH
 ARG ORACLE_IC_URL=https://download.oracle.com/otn_software/linux/instantclient/1932000/instantclient-basic-linux.x64-19.32.0.0.0dbru.zip
