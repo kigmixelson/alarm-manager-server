@@ -14,6 +14,7 @@ from alarm_manager_server.plugins.oracle_diagnostics import diagnose_connection
 from alarm_manager_server.worker.ticket_handlers import (
     BaseTicketHandler, HandlerResult, TicketHandlerContext,
 )
+from alarm_manager_server.worker.tickets import close_reason_label
 
 logger = logging.getLogger(__name__)
 
@@ -77,10 +78,16 @@ class OracleTicketHandler(BaseTicketHandler):
         return dt.astimezone(self.timezone).strftime("%d.%m.%Y %H:%M")
 
     def on_ticket_event(self, ctx: TicketHandlerContext) -> HandlerResult | None:
-        if ctx.event.action != self.cfg.oracle_event:
-            return None
-        if (ctx.ticket.get("external_meta") or {}).get("oracle_recorded"):
-            return None
+        recorded = bool((ctx.ticket.get("external_meta") or {}).get("oracle_recorded"))
+        if ctx.event.action == self.cfg.oracle_event and not recorded:
+            return self._send_and_comment(ctx)
+        if ctx.event.action in {"updated", "closed"}:
+            self._queue_lifecycle_comment(ctx)
+        elif ctx.event.action == "created" and self.cfg.oracle_event == "closed":
+            self._queue_lifecycle_comment(ctx)
+        return None
+
+    def _send_and_comment(self, ctx: TicketHandlerContext) -> HandlerResult | None:
         try:
             result = self._send(ctx)
         except Exception as exc:
@@ -104,19 +111,97 @@ class OracleTicketHandler(BaseTicketHandler):
             "Информация успешно отправлена в Oracle ServiceDesk; получено подтверждение commit."
             + (f" Номер заявки: {result.external_ref}." if result and result.external_ref else "")
         ))
+        self._announce_success(ctx, result.external_ref if result else None)
         return result
+
+    def _oracle_ref(self, ticket: dict) -> str:
+        meta = ticket.get("external_meta") or {}
+        refs = meta.get("external_refs") if isinstance(meta, dict) else None
+        if isinstance(refs, dict) and refs.get("oracle"):
+            return str(refs["oracle"]).strip()
+        ref = ticket.get("external_ref")
+        return str(ref).strip() if ref else ""
+
+    def _lifecycle_message(self, ctx: TicketHandlerContext) -> str:
+        recorded = bool((ctx.ticket.get("external_meta") or {}).get("oracle_recorded"))
+        ref = self._oracle_ref(ctx.ticket)
+        ref_text = f" Номер заявки: {ref}." if ref else ""
+        if ctx.event.action == "created":
+            return "Локальный тикет создан; отправка в Oracle ServiceDesk будет выполнена при закрытии."
+        if ctx.event.action == "updated":
+            changes = "; ".join(ctx.event.changes) if ctx.event.changes else (
+                "состав или состояние группы изменились"
+            )
+            if recorded:
+                return (
+                    "Локальный тикет обновлён; заявка в Oracle ServiceDesk уже зарегистрирована."
+                    f"{ref_text} Изменения: {changes}."
+                )
+            return (
+                "Локальный тикет обновлён; в Oracle ServiceDesk заявка ещё не зарегистрирована."
+                f" Изменения: {changes}."
+            )
+        reason = close_reason_label(ctx.event.close_reason) or ctx.event.close_reason or "не указана"
+        if recorded:
+            return (
+                "Локальный тикет закрыт; заявка в Oracle ServiceDesk уже зарегистрирована."
+                f"{ref_text} Причина закрытия: {reason}."
+            )
+        return (
+            "Локальный тикет закрыт; в Oracle ServiceDesk заявка не регистрировалась."
+            f" Причина закрытия: {reason}."
+        )
+
+    def _queue_lifecycle_comment(self, ctx: TicketHandlerContext) -> None:
+        message = self._lifecycle_message(ctx)
+        self._queue_comment(ctx, message)
+        incident_ids = self._incident_ids(ctx)
+        line = f"Oracle ServiceDesk: {ctx.event.action} ticket={ctx.event.ticket_id}"
+        if incident_ids:
+            line += f"; аварии {','.join(incident_ids)}"
+        logger.info("%s", line)
+        print(line, flush=True)
+
+    def _incident_ids(self, ctx: TicketHandlerContext) -> list[str]:
+        ids: list[str] = []
+        snapshot = ctx.ticket.get("snapshot") or {}
+        ids.extend(str(value) for value in (snapshot.get("member_ids") or []) if value)
+        members = snapshot.get("members")
+        if isinstance(members, dict):
+            ids.extend(str(value) for value in members if value)
+        group = ctx.event.group
+        if group is not None:
+            ids.extend(str(value) for value in (group.member_ids or ()) if value)
+        return list(dict.fromkeys(ids))
+
+    def _announce_success(self, ctx: TicketHandlerContext, external_ref: str | None) -> None:
+        parts = [f"Oracle ServiceDesk: отправка подтверждена ticket={ctx.event.ticket_id}"]
+        if external_ref:
+            parts.append(f"номер заявки {external_ref}")
+        incident_ids = self._incident_ids(ctx)
+        if incident_ids:
+            parts.append(f"аварии {','.join(incident_ids)}")
+        else:
+            parts.append("аварии группы не найдены — комментарий в SAYMON не поставлен в очередь")
+        message = "; ".join(parts)
+        logger.info("%s", message)
+        print(message, flush=True)
 
     def _queue_comment(self, ctx: TicketHandlerContext, message: str) -> None:
         if not self.cfg.oracle_saymon_comment_enabled:
             return
+        incident_ids = self._incident_ids(ctx)
+        if not incident_ids:
+            logger.warning(
+                "Oracle SAYMON comment queued without incidents ticket=%s",
+                ctx.event.ticket_id,
+            )
         meta = ctx.ticket.setdefault("external_meta", {})
         meta.setdefault("oracle_comments", []).append({
             "id": uuid4().hex,
             "text": f"[{self.cfg.oracle_comment_module_name.strip() or 'Alarm Manager'}] "
                     f"{message} Локальный тикет: {ctx.event.ticket_id}.",
-            "pending_incident_ids": list(dict.fromkeys(
-                str(value) for value in (ctx.ticket.get("snapshot") or {}).get("member_ids", []) if value
-            )),
+            "pending_incident_ids": incident_ids,
         })
 
     def _send(self, ctx: TicketHandlerContext) -> HandlerResult | None:

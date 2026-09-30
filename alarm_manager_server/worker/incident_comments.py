@@ -52,8 +52,11 @@ def format_saymon_sd_comment(
 
 def _member_ids_from_ticket(ticket: dict[str, Any]) -> list[str]:
     snap = ticket.get("snapshot") or {}
-    raw = snap.get("member_ids") or []
-    return [str(x) for x in raw if x]
+    ids: list[str] = [str(x) for x in (snap.get("member_ids") or []) if x]
+    members = snap.get("members")
+    if isinstance(members, dict):
+        ids.extend(str(x) for x in members if x)
+    return list(dict.fromkeys(ids))
 
 
 async def annotate_saymon_incidents_on_registration(
@@ -146,7 +149,9 @@ async def flush_oracle_comments(
     if not pending:
         return
     if not cfg.saymon_login or not cfg.saymon_password.get_secret_value():
-        logger.warning("Oracle status comments pending: SAYMON credentials missing")
+        message = "Oracle status comments pending: SAYMON credentials missing"
+        logger.warning("%s", message)
+        print(message, flush=True)
         return
     client = SaymonClient.from_settings(cfg)
     try:
@@ -168,7 +173,11 @@ async def flush_oracle_comments(
                     continue
                 item["pending_incident_ids"].remove(incident_id)
                 store.save()
-                logger.info("Oracle status comment delivered ticket=%s incident=%s",
-                            ticket.get("ticket_id"), incident_id)
+                delivered = (
+                    f"Oracle ServiceDesk: комментарий записан в аварию {incident_id} "
+                    f"(тикет {ticket.get('ticket_id')})"
+                )
+                logger.info("%s", delivered)
+                print(delivered, flush=True)
     finally:
         await client.aclose()

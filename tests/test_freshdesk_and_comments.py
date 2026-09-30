@@ -146,7 +146,7 @@ async def test_annotate_saymon_skips_history(tmp_path):
     assert "hist-1" not in commented
 
 
-async def test_oracle_comment_retry_and_persistence(tmp_path):
+async def test_oracle_comment_retry_and_persistence(tmp_path, capsys):
     from alarm_manager_server.worker.incident_comments import flush_oracle_comments
 
     path = tmp_path / "tickets.json"
@@ -162,10 +162,12 @@ async def test_oracle_comment_retry_and_persistence(tmp_path):
     client.add_incident_comment.side_effect = [None, RuntimeError("unavailable")]
     with patch("alarm_manager_server.worker.incident_comments.SaymonClient.from_settings", return_value=client):
         await flush_oracle_comments(store, cfg)
+        assert "комментарий записан в аварию i1" in capsys.readouterr().out
         reloaded = TicketStore(path)
         client.add_incident_comment.reset_mock(side_effect=True)
         await flush_oracle_comments(reloaded, cfg)
         client.add_incident_comment.assert_awaited_once_with("i2", "[Module] Подтверждено")
+        assert "комментарий записан в аварию i2" in capsys.readouterr().out
         client.add_incident_comment.reset_mock()
         await flush_oracle_comments(reloaded, cfg)
         client.add_incident_comment.assert_not_awaited()
