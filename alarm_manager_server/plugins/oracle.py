@@ -102,16 +102,15 @@ class OracleTicketHandler(BaseTicketHandler):
                 logger.error("Oracle DPY-3015 ticket=%s: DBA must regenerate an 11G/12C password "
                              "verifier or deploy Oracle Client with Thick mode; function was not called",
                              ctx.event.ticket_id)
-            self._queue_comment(ctx, (
-                f"Отправка информации в Oracle ServiceDesk не подтверждена: {reason}. "
-                "Перед повторной отправкой требуется сверка с Oracle."
-            ))
+            self._announce_unconfirmed(ctx, reason)
             raise
+        if result is None:
+            return None
         self._queue_comment(ctx, (
             "Информация успешно отправлена в Oracle ServiceDesk; получено подтверждение commit."
-            + (f" Номер заявки: {result.external_ref}." if result and result.external_ref else "")
-        ))
-        self._announce_success(ctx, result.external_ref if result else None)
+            + (f" Номер заявки: {result.external_ref}." if result.external_ref else "")
+        ), kind="success")
+        self._announce_success(ctx, result.external_ref)
         return result
 
     def _oracle_ref(self, ticket: dict) -> str:
@@ -154,7 +153,7 @@ class OracleTicketHandler(BaseTicketHandler):
 
     def _queue_lifecycle_comment(self, ctx: TicketHandlerContext) -> None:
         message = self._lifecycle_message(ctx)
-        self._queue_comment(ctx, message)
+        self._queue_comment(ctx, message, kind="lifecycle")
         incident_ids = self._incident_ids(ctx)
         line = f"Oracle ServiceDesk: {ctx.event.action} ticket={ctx.event.ticket_id}"
         if incident_ids:
@@ -187,7 +186,15 @@ class OracleTicketHandler(BaseTicketHandler):
         logger.info("%s", message)
         print(message, flush=True)
 
-    def _queue_comment(self, ctx: TicketHandlerContext, message: str) -> None:
+    def _announce_unconfirmed(self, ctx: TicketHandlerContext, reason: str) -> None:
+        message = (
+            f"Oracle ServiceDesk: commit не подтверждён ticket={ctx.event.ticket_id}; "
+            f"{reason}; комментарий в аварию не добавлялся — сверка с Oracle"
+        )
+        logger.error("%s", message)
+        print(message, flush=True)
+
+    def _queue_comment(self, ctx: TicketHandlerContext, message: str, *, kind: str = "success") -> None:
         if not self.cfg.oracle_saymon_comment_enabled:
             return
         incident_ids = self._incident_ids(ctx)
@@ -199,6 +206,7 @@ class OracleTicketHandler(BaseTicketHandler):
         meta = ctx.ticket.setdefault("external_meta", {})
         meta.setdefault("oracle_comments", []).append({
             "id": uuid4().hex,
+            "kind": kind,
             "text": f"[{self.cfg.oracle_comment_module_name.strip() or 'Alarm Manager'}] "
                     f"{message} Локальный тикет: {ctx.event.ticket_id}.",
             "pending_incident_ids": incident_ids,

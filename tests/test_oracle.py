@@ -185,7 +185,7 @@ def test_missing_confirmation_logged(empty, caplog):
     connection.commit.assert_not_called()
 
 
-def test_outcome_comments_success_and_failure():
+def test_outcome_comments_success_and_failure(capsys):
     driver, connection, cursor = driver_mock()
     handler = OracleTicketHandler(config(oracle_comment_module_name="Модуль SD"))
     ctx = context()
@@ -196,12 +196,28 @@ def test_outcome_comments_success_and_failure():
         with pytest.raises(TimeoutError):
             handler.on_ticket_event(ctx)
     comments = ctx.ticket["external_meta"]["oracle_comments"]
-    assert len(comments) == 2
+    assert len(comments) == 1
     assert "[Модуль SD]" in comments[0]["text"]
     assert "успешно" in comments[0]["text"]
-    assert "истекло время ожидания" in comments[1]["text"]
-    assert "private diagnostic" not in comments[1]["text"]
-    assert comments[1]["pending_incident_ids"] == ["i1"]
+    assert comments[0]["kind"] == "success"
+    out = capsys.readouterr().out
+    assert "отправка подтверждена" in out
+    assert "commit не подтверждён ticket=T-1" in out
+    assert "комментарий в аварию не добавлялся" in out
+
+
+def test_timeout_does_not_comment_incident(capsys):
+    driver, _, cursor = driver_mock()
+    cursor.callfunc.side_effect = TimeoutError("call timeout")
+    ctx = context()
+    ctx.ticket["snapshot"] = {"member_ids": ["i1"]}
+    with patch("alarm_manager_server.plugins.oracle.import_module", return_value=driver):
+        with pytest.raises(TimeoutError):
+            OracleTicketHandler(config()).on_ticket_event(ctx)
+    assert not (ctx.ticket.get("external_meta") or {}).get("oracle_comments")
+    out = capsys.readouterr().out
+    assert "commit не подтверждён ticket=T-1" in out
+    assert "комментарий в аварию не добавлялся" in out
 
 
 def test_success_prints_to_console_and_queues_group_incidents(capsys, caplog):

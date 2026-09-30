@@ -173,11 +173,16 @@ async def flush_oracle_comments(
                     continue
                 item["pending_incident_ids"].remove(incident_id)
                 store.save()
-                delivered = (
-                    f"Oracle ServiceDesk: комментарий записан в аварию {incident_id} "
-                    f"(тикет {ticket.get('ticket_id')})"
+                kind = item.get("kind")
+                if kind == "success":
+                    label = "об успешной отправке в Oracle"
+                elif kind == "lifecycle":
+                    label = "о статусе заявки в Oracle"
+                else:
+                    label = "Oracle"
+                logger.info(
+                    "Oracle ServiceDesk: комментарий %s записан в аварию %s (тикет %s)",
+                    label, incident_id, ticket.get("ticket_id"),
                 )
-                logger.info("%s", delivered)
-                print(delivered, flush=True)
     finally:
         await client.aclose()
