@@ -173,6 +173,9 @@ compose.yml create --no-build --pull never`, скопируйте файл в wo
 
 Не выполняйте `docker compose down -v`: флаг `-v` удалит тома с состоянием.
 
+Как посмотреть уже загруженные теги `alarm-manager-server` и удалить старые
+после приёмки — в [образах Docker](docker-images.md).
+
 ## 6. Без Docker: автономная установка из wheel-файлов
 
 На целевом сервере должны быть установлены Python **3.11+**, модуль `venv`, pip,
