@@ -107,3 +107,40 @@ def test_diff_detects_status_change():
     }
     changes = diff_snapshots(old, new)
     assert any("состояние" in c for c in changes)
+
+
+def test_member_snapshot_ignores_saymon_comments():
+    """Comments written back to SAYMON must not produce ticket UPDATE events.
+
+    Otherwise: Oracle UPDATE → comment on incident → next poll sees "change" →
+    Oracle UPDATE again → infinite loop.
+    """
+    cfg = Settings()
+    inc = _inc("a")
+    # Simulate fields that may appear on a SAYMON incident after commenting.
+    inc.raw = {
+        "comment": "Oracle ServiceDesk: заявка обновлена",
+        "commentsCount": 3,
+        "commentTimestamp": 1_700_000_000_000,
+        "text": "alarm",
+    }
+    groups = build_tracked_groups([inc], GroupingResult(), cfg)
+    snap = group_snapshot(groups[0])
+    member = snap["members"]["a"]
+    assert set(member) == {
+        "status", "status_label", "started_at", "resolved_at",
+        "text", "object", "avaria_owner",
+    }
+    assert "comment" not in member
+    assert member["text"] == "alarm"
+
+    # A second poll with more comments but same alarm text → no diff.
+    inc2 = _inc("a")
+    inc2.raw = {
+        "comment": "ещё один комментарий",
+        "commentsCount": 4,
+        "commentTimestamp": 1_700_000_100_000,
+        "text": "alarm",
+    }
+    snap2 = group_snapshot(build_tracked_groups([inc2], GroupingResult(), cfg)[0])
+    assert diff_snapshots(snap, snap2) == []

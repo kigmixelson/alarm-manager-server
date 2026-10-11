@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 from time import monotonic
 from datetime import datetime
@@ -17,6 +19,20 @@ from alarm_manager_server.worker.ticket_handlers import (
 from alarm_manager_server.worker.tickets import close_reason_label
 
 logger = logging.getLogger(__name__)
+
+# Content fields that identify a distinct ServiceDesk write. Dates are excluded:
+# every local ticket UPDATE bumps updated_at, but that alone must not re-call
+# Oracle or queue another SAYMON comment (anti feedback loop).
+_CONTENT_FP_KEYS = (
+    "p_id_monit",
+    "p_id_dept",
+    "p_id_build",
+    "p_id_def",
+    "p_name_equip",
+    "p_name_defect",
+    "p_executed_work",
+    "p_location",
+)
 
 # PL/SQL function that returns SYS_REFCURSOR. SELECT ... FROM dual / executeQuery
 # only yields the cursor handle, not its rows — callfunc opens the cursor.
@@ -77,9 +93,15 @@ class OracleTicketHandler(BaseTicketHandler):
             raise ValueError("Oracle ticket timestamps must include a timezone")
         return dt.astimezone(self.timezone).strftime("%d.%m.%Y %H:%M")
 
-    def on_ticket_event(self, ctx: TicketHandlerContext) -> HandlerResult | None:
+    def _should_send(self, ctx: TicketHandlerContext) -> bool:
+        """Initial write on ORACLE_EVENT; subsequent UPDATE when already registered."""
         recorded = bool((ctx.ticket.get("external_meta") or {}).get("oracle_recorded"))
         if ctx.event.action == self.cfg.oracle_event and not recorded:
+            return True
+        return ctx.event.action == "updated" and recorded
+
+    def on_ticket_event(self, ctx: TicketHandlerContext) -> HandlerResult | None:
+        if self._should_send(ctx):
             return self._send_and_comment(ctx)
         if ctx.event.action in {"updated", "closed"}:
             self._queue_lifecycle_comment(ctx)
@@ -106,10 +128,20 @@ class OracleTicketHandler(BaseTicketHandler):
             raise
         if result is None:
             return None
-        self._queue_comment(ctx, (
-            "Информация успешно отправлена в Oracle ServiceDesk; получено подтверждение commit."
-            + (f" Номер заявки: {result.external_ref}." if result.external_ref else "")
-        ), kind="success")
+        is_update = ctx.event.action == "updated"
+        if is_update:
+            message = (
+                "Заявка в Oracle ServiceDesk обновлена; получено подтверждение commit."
+                + (f" Номер заявки: {result.external_ref}." if result.external_ref else "")
+            )
+            kind = "update"
+        else:
+            message = (
+                "Информация успешно отправлена в Oracle ServiceDesk; получено подтверждение commit."
+                + (f" Номер заявки: {result.external_ref}." if result.external_ref else "")
+            )
+            kind = "success"
+        self._queue_comment(ctx, message, kind=kind)
         self._announce_success(ctx, result.external_ref)
         return result
 
@@ -120,6 +152,44 @@ class OracleTicketHandler(BaseTicketHandler):
             return str(refs["oracle"]).strip()
         ref = ticket.get("external_ref")
         return str(ref).strip() if ref else ""
+
+    @staticmethod
+    def _local_ticket_number(ticket_id: str) -> int | None:
+        """Extract numeric id from local ticket id (`T-000012` / `T-12` → 12)."""
+        raw = (ticket_id or "").strip()
+        if raw.upper().startswith("T-"):
+            raw = raw[2:]
+        try:
+            return int(raw)
+        except ValueError:
+            return None
+
+    def _p_id_monit(self, ctx: TicketHandlerContext) -> int:
+        """Ticket number for P_ID_MONIT — never a fixed system constant.
+
+        Prefer the Oracle ServiceDesk number once known, otherwise the local
+        ticket sequence, otherwise the optional ORACLE_ID_MONIT fallback.
+        """
+        ref = self._oracle_ref(ctx.ticket)
+        if ref:
+            try:
+                return int(ref)
+            except ValueError:
+                pass
+        local = self._local_ticket_number(ctx.event.ticket_id)
+        if local is not None:
+            return local
+        if self.cfg.oracle_id_monit is not None:
+            return self.cfg.oracle_id_monit
+        raise ValueError(
+            f"Cannot resolve P_ID_MONIT for ticket {ctx.event.ticket_id!r}"
+        )
+
+    @staticmethod
+    def _content_fingerprint(params: dict) -> str:
+        payload = {key: params.get(key) for key in _CONTENT_FP_KEYS}
+        raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
     def _lifecycle_message(self, ctx: TicketHandlerContext) -> str:
         recorded = bool((ctx.ticket.get("external_meta") or {}).get("oracle_recorded"))
@@ -214,17 +284,21 @@ class OracleTicketHandler(BaseTicketHandler):
 
     def _send(self, ctx: TicketHandlerContext) -> HandlerResult | None:
         cfg = self.cfg
-        if ctx.event.action != cfg.oracle_event:
-            return None
-        if (ctx.ticket.get("external_meta") or {}).get("oracle_recorded"):
+        if not self._should_send(ctx):
             return None
         snapshot = ctx.ticket.get("snapshot") or {}
+        # UPDATE/CREATE → last change; CLOSE event → closed_at.
+        end_source = (
+            ctx.ticket.get("closed_at")
+            if ctx.event.action == "closed"
+            else ctx.ticket.get("updated_at")
+        )
         params = {
             "p_b_date": self._date(cfg.oracle_b_date, ctx.ticket.get("created_at", "")),
-            "p_e_date": self._date(cfg.oracle_e_date, (
-                ctx.ticket.get("closed_at") if cfg.oracle_event == "closed"
-                else ctx.ticket.get("updated_at")
-            ) or ctx.ticket.get("created_at", "")),
+            "p_e_date": self._date(
+                cfg.oracle_e_date,
+                end_source or ctx.ticket.get("created_at", ""),
+            ),
             "p_id_dept": cfg.oracle_id_dept,
             "p_name_equip": cfg.oracle_name_equip or ctx.event.title or snapshot.get("title", ""),
             "p_name_defect": cfg.oracle_name_defect or ctx.body_text or "\n".join(
@@ -234,8 +308,17 @@ class OracleTicketHandler(BaseTicketHandler):
             "p_id_build": cfg.oracle_id_build,
             "p_location": cfg.oracle_location,
             "p_id_def": cfg.oracle_id_def,
-            "p_id_monit": cfg.oracle_id_monit,
+            "p_id_monit": self._p_id_monit(ctx),
         }
+        content_fp = self._content_fingerprint(params)
+        prev_fp = (ctx.ticket.get("external_meta") or {}).get("oracle_content_fp")
+        if ctx.event.action == "updated" and prev_fp == content_fp:
+            logger.info(
+                "Oracle skip update ticket=%s — ServiceDesk content unchanged "
+                "(no call, no SAYMON comment; breaks comment/update feedback)",
+                ctx.event.ticket_id,
+            )
+            return None
         driver = None
         started = monotonic()
         stage = "initialize"
@@ -320,9 +403,14 @@ class OracleTicketHandler(BaseTicketHandler):
             if stage in {"initialize", "connect"}:
                 diagnose_connection(driver, cfg, exc, ctx.event.ticket_id)
             raise
+        # Keep previously known Oracle number if the cursor did not return one.
         return HandlerResult(
-            external_ref=ref,
-            external_meta={"system": "oracle", "oracle_recorded": True},
+            external_ref=ref or self._oracle_ref(ctx.ticket) or None,
+            external_meta={
+                "system": "oracle",
+                "oracle_recorded": True,
+                "oracle_content_fp": content_fp,
+            },
         )
 
     def _cursor_ref(self, cursor) -> str | None:

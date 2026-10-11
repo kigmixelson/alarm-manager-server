@@ -176,6 +176,8 @@ async def flush_oracle_comments(
                 kind = item.get("kind")
                 if kind == "success":
                     label = "об успешной отправке в Oracle"
+                elif kind == "update":
+                    label = "об обновлении заявки в Oracle"
                 elif kind == "lifecycle":
                     label = "о статусе заявки в Oracle"
                 else:

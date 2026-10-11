@@ -106,21 +106,22 @@ Worker автоматически начнёт обработку аварий �
 | `ORACLE_ID_DEPT` | `P_ID_DEPT`, подразделение |
 | `ORACLE_ID_BUILD` | `P_ID_BUILD`, здание |
 | `ORACLE_ID_DEF` | `P_ID_DEF`, дефект |
-| `ORACLE_ID_MONIT` | `P_ID_MONIT`, идентификатор мониторинга |
+| `ORACLE_ID_MONIT` | запасной `P_ID_MONIT`, если номер тикета недоступен; в вызов уходит номер локального тикета (`T-000012` → `12`) или уже известный номер заявки Oracle |
 | `ORACLE_NAME_EQUIP` | `P_NAME_EQUIP`; пусто — заголовок группы |
 | `ORACLE_NAME_DEFECT` | `P_NAME_DEFECT`; пусто — описание группы |
 | `ORACLE_EXECUTED_WORK` | `P_EXECUTED_WORK`; реальные работы задаются явно |
 | `ORACLE_LOCATION` | `P_LOCATION` |
 | `ORACLE_B_DATE`, `ORACLE_E_DATE` | Фиксированные даты `DD.MM.YYYY HH:MM`; обычно оставлять пустыми |
 | `ORACLE_TIMEZONE` | Часовой пояс дат; по умолчанию `Europe/Moscow` |
-| `ORACLE_EVENT` | `created` — при создании; `closed` — при закрытии |
+| `ORACLE_EVENT` | событие первичной записи: `created` или `closed`; после успеха `updated` тоже вызывает функцию |
 | `ORACLE_RESULT_ID_COLUMN` | Колонка номера заявки в возвращённом REF CURSOR |
 | `ORACLE_CONNECT_TIMEOUT_SEC` | Таймаут подключения, по умолчанию 30 секунд |
 | `ORACLE_CALL_TIMEOUT_MS` | Бюджет ожидания результата и commit, по умолчанию 30000 мс |
 
 Без фиксированных дат передаются времена создания и обновления/закрытия
 **локального тикета**. При CREATE начало и конец обычно совпадают. Для записи
-после закрытия установите `ORACLE_EVENT=closed`. UPDATE ничего не записывает.
+после закрытия установите `ORACLE_EVENT=closed`. После успешной первичной
+записи событие UPDATE снова вызывает функцию с `P_ID_MONIT` = номер заявки.
 
 Функция возвращает `SYS_REFCURSOR`. Если в курсоре одна колонка, её значение
 считается номером заявки. Для нескольких колонок укажите `ORACLE_RESULT_ID_COLUMN`.

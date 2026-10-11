@@ -67,6 +67,8 @@ def test_callfunc_opens_ref_cursor_and_commits():
     assert params["P_NAME_EQUIP"] == "Объект '1'"
     assert params["P_NAME_DEFECT"] == "Дефект 'оборудования'"
     assert params["P_ID_DEPT"] == 215094
+    # Local ticket "T-1" → P_ID_MONIT=1 (not the config constant alone).
+    assert params["P_ID_MONIT"] == 1
     cursor.callfunc.return_value.fetchone.assert_called_once()
     cursor.callfunc.return_value.close.assert_called_once()
     connection.commit.assert_called_once()
@@ -105,6 +107,39 @@ def test_close_event_and_skip_duplicates():
         assert "уже зарегистрирована" in ctx.ticket["external_meta"]["oracle_comments"][0]["text"]
     assert cursor.callfunc.call_count == 1
     connection.commit.assert_called_once()
+
+
+def test_p_id_monit_uses_local_ticket_number():
+    driver, _, cursor = driver_mock()
+    ctx = TicketHandlerContext(
+        TicketEvent("created", "T-000042", None, [], title="Host"),
+        {"created_at": "2026-07-23T12:37:00+00:00",
+         "updated_at": "2026-07-23T12:38:00+00:00",
+         "closed_at": "2026-07-23T13:00:00+00:00"},
+        "defect",
+    )
+    with patch("alarm_manager_server.plugins.oracle.import_module", return_value=driver):
+        # Config still has oracle_id_monit=1 — must not override ticket number.
+        OracleTicketHandler(config(oracle_id_monit=1)).on_ticket_event(ctx)
+    assert cursor.callfunc.call_args.args[3]["P_ID_MONIT"] == 42
+
+
+def test_p_id_monit_prefers_oracle_external_ref():
+    driver, _, cursor = driver_mock()
+    ctx = TicketHandlerContext(
+        TicketEvent("created", "T-000042", None, [], title="Host"),
+        {
+            "created_at": "2026-07-23T12:37:00+00:00",
+            "updated_at": "2026-07-23T12:38:00+00:00",
+            "closed_at": "2026-07-23T13:00:00+00:00",
+            "external_ref": "98765",
+            "external_meta": {"external_refs": {"oracle": "98765"}},
+        },
+        "defect",
+    )
+    with patch("alarm_manager_server.plugins.oracle.import_module", return_value=driver):
+        OracleTicketHandler(config()).on_ticket_event(ctx)
+    assert cursor.callfunc.call_args.args[3]["P_ID_MONIT"] == 98765
 
 
 def test_cursor_id_column():
@@ -246,10 +281,10 @@ def test_success_prints_to_console_and_queues_group_incidents(capsys, caplog):
     ]
 
 
-def test_update_comments_recorded_ticket_without_resend(capsys):
+def test_update_sends_to_oracle_with_ticket_id(capsys):
     handler = OracleTicketHandler(config())
     ctx = TicketHandlerContext(
-        TicketEvent("updated", "T-1", None, ["+1 авария (i2)"], title="Объект '1'"),
+        TicketEvent("updated", "T-000042", None, ["+1 авария (i2)"], title="Объект '1'"),
         {
             "created_at": "2026-07-23T12:37:00+00:00",
             "updated_at": "2026-07-23T12:38:00+00:00",
@@ -263,18 +298,85 @@ def test_update_comments_recorded_ticket_without_resend(capsys):
         },
         "Дефект 'оборудования'",
     )
+    driver, connection, cursor = driver_mock()
+    with patch("alarm_manager_server.plugins.oracle.import_module", return_value=driver):
+        result = handler.on_ticket_event(ctx)
+    cursor.callfunc.assert_called_once()
+    params = cursor.callfunc.call_args.args[3]
+    assert params["P_ID_MONIT"] == 123
+    assert params["P_E_DATE"] == "23.07.2026 15:38"
+    assert result is not None
+    assert result.external_ref == "123"
+    assert result.external_meta.get("oracle_content_fp")
+    comment = ctx.ticket["external_meta"]["oracle_comments"][0]["text"]
+    assert "обновлена" in comment
+    assert "Номер заявки: 123" in comment
+    assert ctx.ticket["external_meta"]["oracle_comments"][0]["kind"] == "update"
+    connection.commit.assert_called_once()
+    out = capsys.readouterr().out
+    assert "отправка подтверждена ticket=T-000042" in out
+    assert "аварии i1,i2" in out
+
+
+def test_update_skips_oracle_when_content_unchanged(caplog):
+    """Same ServiceDesk payload → no callfunc and no new SAYMON comment (anti-loop)."""
+    handler = OracleTicketHandler(config())
+    ctx = TicketHandlerContext(
+        TicketEvent("updated", "T-000042", None, ["статистика"], title="Объект '1'"),
+        {
+            "created_at": "2026-07-23T12:37:00+00:00",
+            "updated_at": "2026-07-23T12:50:00+00:00",
+            "external_ref": "123",
+            "external_meta": {
+                "oracle_recorded": True,
+                "external_refs": {"oracle": "123"},
+            },
+            "snapshot": {"member_ids": ["i1"], "title": "Объект '1'"},
+        },
+        "Дефект 'оборудования'",
+    )
+    # Pre-compute fingerprint of the payload that _send would build.
+    params = {
+        "p_id_monit": 123,
+        "p_id_dept": 215094,
+        "p_id_build": 30,
+        "p_id_def": 11449,
+        "p_name_equip": "Объект '1'",
+        "p_name_defect": "Дефект 'оборудования'",
+        "p_executed_work": "",
+        "p_location": "",
+    }
+    ctx.ticket["external_meta"]["oracle_content_fp"] = handler._content_fingerprint(params)
+    driver, _, cursor = driver_mock()
+    with caplog.at_level("INFO"), patch(
+        "alarm_manager_server.plugins.oracle.import_module", return_value=driver
+    ):
+        assert handler.on_ticket_event(ctx) is None
+    cursor.callfunc.assert_not_called()
+    assert not ctx.ticket["external_meta"].get("oracle_comments")
+    assert "content unchanged" in caplog.text
+
+
+def test_update_without_prior_registration_only_comments(capsys):
+    """UPDATE before the initial Oracle write — no callfunc, lifecycle comment only."""
+    handler = OracleTicketHandler(config())
+    ctx = TicketHandlerContext(
+        TicketEvent("updated", "T-1", None, ["+1 авария (i2)"], title="Объект '1'"),
+        {
+            "created_at": "2026-07-23T12:37:00+00:00",
+            "updated_at": "2026-07-23T12:38:00+00:00",
+            "snapshot": {"member_ids": ["i1", "i2"]},
+        },
+        "Дефект 'оборудования'",
+    )
     driver, _, cursor = driver_mock()
     with patch("alarm_manager_server.plugins.oracle.import_module", return_value=driver):
         assert handler.on_ticket_event(ctx) is None
     cursor.callfunc.assert_not_called()
     comment = ctx.ticket["external_meta"]["oracle_comments"][0]["text"]
-    assert "уже зарегистрирована" in comment
-    assert "Номер заявки: 123" in comment
-    assert "+1 авария (i2)" in comment
-    assert comment.count("Локальный тикет: T-1") == 1
+    assert "ещё не зарегистрирована" in comment
     out = capsys.readouterr().out
     assert "Oracle ServiceDesk: updated ticket=T-1" in out
-    assert "аварии i1,i2" in out
 
 
 def test_thick_initialization_and_descriptor():
